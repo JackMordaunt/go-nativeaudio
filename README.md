@@ -27,3 +27,11 @@ func main() {
         nativeaudio.Play("audio.m4a")
 }
 ```
+
+## TODO 
+
+- [ ] report back the sample rate, number of channels and bit depth 
+- [ ] macOS native bindings 
+- [ ] byte level `Decode([]byte) []byte` function that avoids file system dependency all together 
+- [ ] optimize memory usage  
+        - we can manage memory entirely from the Go side with a touch more orchestration
