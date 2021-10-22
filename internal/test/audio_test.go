@@ -63,9 +63,9 @@ func equal(t *testing.T, left, right []byte) bool {
 		)
 		sum += abs(lsample - rsample)
 	}
-	mean := sum / size
-	t.Logf("mean: %d, sum: %d, size: %d\n", mean, sum, size)
-	if mean > 1 {
+	mean := float64(sum) / float64(size)
+	t.Logf("mean: %f, sum: %d, size: %d\n", mean, sum, size)
+	if mean > 0.1 {
 		return false
 	}
 	return true
