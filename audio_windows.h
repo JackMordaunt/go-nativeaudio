@@ -44,7 +44,12 @@ typedef struct Buffer
         BYTE* Data; // Data is the pointer to the first byte. 
 } Buffer; 
 
+// BufferFree deallocates the memory for a buffer, including the pointer
+// to it and it's pointer to the raw data. 
 void BufferFree(Buffer*);
+
+// ErrorFree deallocates the memory for an error and all wrapped errors. 
+void ErrorFree(Error*);
 
 // Load the decoded PCM data from the given file.
 //

@@ -27,6 +27,24 @@ ErrorWithCode(Error *err, int code)
         return err;
 }
 
+// ErrorFree deallocates the error and any wrapped errors. 
+void 
+ErrorFree(Error* err)
+{
+        // cursor points to the error currently being processed. 
+        Error *cursor = NULL;
+
+        while (err != NULL) 
+        {
+                cursor = err;
+                err = err->Err;
+                if (cursor->Str != NULL)
+                        free(cursor->Str);
+                free(cursor);
+        }
+}
+
+
 // NewResult constructs a Result with the provided value and error.
 // Usually one of the hose pointers will be NULL.
 Result

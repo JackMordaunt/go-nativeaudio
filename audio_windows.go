@@ -36,7 +36,7 @@ func load(path string) ([]byte, error) {
 	defer C.free(unsafe.Pointer(cPath))
 	result := C.Load(cPath)
 	if result.Err != nil {
-		defer C.free(unsafe.Pointer(result.Err))
+		defer C.ErrorFree(result.Err)
 		return nil, fmt.Errorf(C.GoString(result.Err.Str))
 	}
 	buffer := (*C.Buffer)(result.Value)
