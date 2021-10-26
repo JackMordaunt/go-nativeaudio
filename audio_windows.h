@@ -109,3 +109,13 @@ HRESULT MFCreateMFByteStreamOnStream(
         IStream       *pStream,
         IMFByteStream **ppByteStream
 );
+
+// StartMediaFramewok initializes the media framework ready to decode
+// and playback audio.  
+Error*
+StartMediaFramework();
+
+// EndMediaFramewok shuts down the media framework. Decoding and playback
+// will not work hence forth.  
+Error*
+EndMediaFramework();

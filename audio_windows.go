@@ -3,9 +3,10 @@
 package nativeaudio
 
 // -g: add to CFLAGS to include dwarf debug data
+// -O: optimization level 0, 1, 2, 3, s
 
 /*
-#cgo CFLAGS: -Wall -Werror
+#cgo CFLAGS: -Werror -g -O3
 #cgo LDFLAGS: -lWinmm -lMf -lMfplat  -lMfuuid -loleaut32 -limm32 -lversion -lWindowsApp -lMfreadwrite -lShlwapi
 #include "audio_windows.h"
 */
@@ -18,6 +19,20 @@ import (
 	"strings"
 	"unsafe"
 )
+
+func start() error {
+	if err := C.StartMediaFramework(); err != nil {
+		return fmt.Errorf("initializing Windows Media Framework: %w", collectErrors(err))
+	}
+	return nil
+}
+
+func end() error {
+	if err := C.EndMediaFramework(); err != nil {
+		return fmt.Errorf("shutting down Windows Media Framework: %w", collectErrors(err))
+	}
+	return nil
+}
 
 // play the audio file using Windows Media Foundation.
 func play(path string) error {
@@ -32,6 +47,8 @@ func play(path string) error {
 }
 
 // load raw pcm data from the Windows Media Foundation.
+//
+// uncompressed is a read-only slice backed by a C buffer. Do not mutate.
 //
 // PERF(jfm): we can optimize this by allocating the buffer from Go,
 // and passing it in for C to fill up. It would require more
@@ -59,6 +76,8 @@ func load(path string) (uncompressed []byte, format Format, err error) {
 
 // decode compressed data, returning the uncompressed data as PCM data
 // (s16le) and details about the PCM required to playback correctly.
+//
+// uncompressed is a read-only slice backed by a C buffer. Do not mutate.
 func decode(compressed []byte) (uncompressed []byte, format Format, err error) {
 	defer runtime.KeepAlive(compressed)
 	r := C.Decode(cBytes(compressed))
@@ -80,9 +99,14 @@ func decode(compressed []byte) (uncompressed []byte, format Format, err error) {
 
 // goBytes returns a slice backed by a C byte array.
 //
-// [1 << 30] means assume backing array is huge, and then slice into it
+// [1 << 30] means assume backing array is 1GB, and then slice into it
 // with length.
+//
+// If the data is larger than 1GB, allocate more memory.
 func goBytes(ptr unsafe.Pointer, length int) []byte {
+	if length > 1<<30 {
+		return C.GoBytes(ptr, C.int(length))
+	}
 	return (*[1 << 30]byte)(ptr)[:length:length]
 }
 

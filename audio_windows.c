@@ -70,14 +70,16 @@ CharWiden(char* str)
         return NewResult(target, NULL);
 }
 
+#define BUFFER_DEFAULT_SIZE 1024*1024
+
 // BufferNew allocates a new buffer ready to use.
 Buffer* 
 BufferNew()
 {
         Buffer *buffer = calloc(1, sizeof(Buffer));
-        buffer->Data = NULL;
+        buffer->Data = calloc(BUFFER_DEFAULT_SIZE, 1);
         buffer->Len = 0;
-        buffer->Cap = 0;
+        buffer->Cap = BUFFER_DEFAULT_SIZE;
         return buffer;
 }
 
@@ -87,8 +89,8 @@ void
 BufferGrow(Buffer *buffer, int amount) 
 {
         BYTE* tmp = NULL;
-        int target = 0;
-         if (buffer->Cap > buffer->Len + amount) 
+        int target = buffer->Cap;
+        if (buffer->Cap > buffer->Len + amount) 
         {
                 return;
         }
@@ -107,14 +109,7 @@ BufferGrow(Buffer *buffer, int amount)
 // BufferWrite the data to the buffer, growing if necessary. 
 void
 BufferWrite(Buffer* buffer, int size, BYTE* data)
-{
-        // TMP sum counting. 
-        int sum = 0; 
-        for (int ii = 0; ii < size; ii++)
-        {
-                sum += data[ii];
-        }
-        
+{       
         if (buffer->Cap < buffer->Len + size)
         {
                 BufferGrow(buffer, size);
@@ -483,7 +478,11 @@ GetFormat(IMFMediaType * m_type)
 {
         HRESULT hr = S_OK;
         FormatResult r = {
-                .Format = {},
+                .Format = {
+                        .SampleRate = 0,
+                        .BitDepth = 0,
+                        .Channels = 0
+                },
                 .Err = NULL,
         };
         
@@ -682,14 +681,6 @@ Decode(BYTE* compressed, UINT size)
                 .Err = NULL,
         };
 
-        hr = MFStartup(MF_VERSION, MFSTARTUP_LITE);
-
-        if (FAILED(hr))
-        {
-                r.Err = ErrorWithCode(ErrorStr("initializing media foundation"), hr);
-                goto done;
-        }
-
         // stream is the type required by Media Foundation. 
         // We can get one of these by wrapping a COM IStream. 
         IMFByteStream * stream = NULL;
@@ -746,17 +737,6 @@ Decode(BYTE* compressed, UINT size)
 
 done:
 
-        hr = MFShutdown();
-
-        if (FAILED(hr)) 
-        {
-                // Capture the shutdown error only if we didn't already encounter one. 
-                if (r.Err == NULL) 
-                {
-                        r.Err = ErrorWithCode(ErrorStr("shutting down media foundation"), hr);
-                }
-        }
-
         if (m_type != NULL)
         {
                 m_type->lpVtbl->Release(m_type);
@@ -791,19 +771,23 @@ Load(char* path)
         Buffer *buffer = NULL;                  // Buffer to accumulate decoded PCM and return to Go.
         Error *err = NULL;                      // Dyanmic error. 
         HRESULT hr = S_OK;                      // Windows return code.
+        FormatResult fr = {
+                .Err = NULL,
+                .Format = {
+                        .BitDepth = 0,
+                        .SampleRate = 0,
+                        .Channels = 0,
+                }
+        };
         DecodeResult dr = {
                 .Err = NULL,
                 .Uncompressed = NULL,
-                .Format = {}
+                .Format = {
+                        .BitDepth = 0,
+                        .SampleRate = 0,
+                        .Channels = 0,
+                }
         };
-
-        hr = MFStartup(MF_VERSION, MFSTARTUP_FULL);
-
-        if (FAILED(hr))
-        {
-                err = ErrorWithCode(ErrorStr("starting media platform"), hr);
-                goto done;
-        }
 
         Result r = NewSourceReaderForFile(path);
         
@@ -825,13 +809,19 @@ Load(char* path)
                 goto done;
         }  
 
-        FormatResult fr = GetFormat(m_type);
+        fr = GetFormat(m_type);
 
         if (fr.Err != NULL)
         {
                 dr.Err = ErrorWrap(fr.Err, "getting format");
                 goto done;
         }
+
+        assert(fr.Format.BitDepth != 0);
+        assert(fr.Format.BitDepth <= 2);
+        assert(fr.Format.SampleRate != 0);
+        assert(fr.Format.Channels != 0);
+        assert(fr.Format.Channels <= 2);
 
         // Heap allocated buffer to accumulate the audio data. 
         // NOTE(jfm): Free from cgo side with BufferFree().
@@ -846,17 +836,6 @@ Load(char* path)
         }
 
 done:
-
-        hr = MFShutdown();
-
-        if (FAILED(hr)) 
-        {
-                // Capture the shutdown error only if we didn't already encounter one. 
-                if (r.Err == NULL) 
-                {
-                        r.Err = ErrorWithCode(ErrorStr("shutting down media foundation"), hr);
-                }
-        }
 
         if (m_type != NULL)
         {
@@ -932,13 +911,6 @@ Play(char* path)
         }
 
         audio_file_path = (WCHAR*)r.Value;
-
-        // Start the platform.
-        if ((hr = MFStartup(MF_VERSION, MFSTARTUP_LITE)) != S_OK)
-        {
-                err = ErrorWithCode(ErrorStr("starting media platform"), hr);
-                goto done;
-        }
 
         // Create a media session which orchestrates the media processing
         // graph.
@@ -1102,5 +1074,45 @@ done:
         {
                 session->lpVtbl->Release(session);
         }
+        return err;
+}
+
+Error* 
+StartMediaFramework()
+{
+        
+        Error * err = NULL;
+        HRESULT hr = S_OK;
+
+        hr = MFStartup(MF_VERSION, MFSTARTUP_LITE);
+
+        if (FAILED(hr))
+        {
+                err = ErrorWithCode(ErrorStr("initializing media foundation"), hr);
+                goto done;
+        }
+
+done: 
+        return err;
+}
+
+Error* 
+EndMediaFramework()
+{
+        Error * err = NULL;
+        HRESULT hr = S_OK;
+
+        hr = MFShutdown();
+
+        if (FAILED(hr)) 
+        {
+                // Capture the shutdown error only if we didn't already encounter one. 
+                if (err == NULL) 
+                {
+                        err = ErrorWithCode(ErrorStr("shutting down media foundation"), hr);
+                }
+        }
+
+done:
         return err;
 }
