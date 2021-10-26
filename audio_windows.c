@@ -31,20 +31,15 @@ ErrorWithCode(Error *err, int code)
 }
 
 // ErrorFree deallocates the error and any wrapped errors. 
-// BUG: heap corruption. 
 void 
 ErrorFree(Error* err)
 {
-        // cursor points to the error currently being processed. 
-        Error *cursor = NULL;
-
+        Error *tmp = NULL;
         while (err != NULL) 
         {
-                cursor = err;
-                if (cursor->Str != NULL)
-                        free(cursor->Str);
-                free(cursor);
+                tmp = err;
                 err = err->Err;
+                free(tmp);
         }
 }
 

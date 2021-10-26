@@ -25,8 +25,8 @@ func play(path string) error {
 	defer C.free(unsafe.Pointer(cPath))
 	err := C.Play(cPath)
 	if err != nil {
-		defer C.free(unsafe.Pointer(err))
-		return fmt.Errorf(C.GoString(err.Str))
+		defer C.ErrorFree(err)
+		return collectErrors(err)
 	}
 	return nil
 }
@@ -42,7 +42,7 @@ func load(path string) ([]byte, Format, error) {
 	defer C.free(unsafe.Pointer(cPath))
 	r := C.Load(cPath)
 	if r.Err != nil {
-		// defer C.ErrorFree(result.Err)
+		defer C.ErrorFree(r.Err)
 		return nil, Format{}, collectErrors(r.Err)
 	}
 	defer C.BufferFree(r.Uncompressed)
@@ -63,7 +63,7 @@ func decode(compressed []byte) (uncompressed []byte, format Format, err error) {
 	defer runtime.KeepAlive(compressed)
 	r := C.Decode((*C.uchar)(C.CBytes(compressed)), C.uint(len(compressed)))
 	if r.Err != nil && r.Err.Str != nil {
-		// TODO(jfm): Free result.
+		defer C.ErrorFree(r.Err)
 		return nil, format, collectErrors(r.Err)
 	}
 	defer C.BufferFree(r.Uncompressed)
