@@ -26,10 +26,10 @@ func Decode(compressed []byte) (uncompressed []byte, format Format, err error) {
 	return decode(compressed)
 }
 
-// Format desribes the features of the associated PCM data necessary
+// Format describes the features of the associated PCM data necessary
 // for correct playback.
 type Format struct {
-	SampleRate int
-	Channels   int
-	BitDepth   int
+	SampleRate int // samples per second.
+	Channels   int // number channels.
+	BitDepth   int // bytes per sample.
 }

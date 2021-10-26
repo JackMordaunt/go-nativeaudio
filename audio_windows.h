@@ -15,6 +15,8 @@
 #include <assert.h>
 #include <stdint.h>
 
+// TODO: native volume (https://docs.microsoft.com/en-us/windows/win32/api/mfidl/nn-mfidl-imfaudiostreamvolume)
+
 // Error declares an error return containing a message and possibly
 // wrapping another error.
 //
@@ -101,10 +103,8 @@ Error* Play(char *path);
 // Decode a buffer of compressed audio using Windows Media Foundation. 
 DecodeResult Decode(BYTE* compressed, UINT size);
 
-// TODO: native volume (https://docs.microsoft.com/en-us/windows/win32/api/mfidl/nn-mfidl-imfaudiostreamvolume)
-
-
-// Stub. 
+// Stub to compile against mingw64 which apparently does not include 
+// this function in it's header file.  
 HRESULT MFCreateMFByteStreamOnStream(
         IStream       *pStream,
         IMFByteStream **ppByteStream

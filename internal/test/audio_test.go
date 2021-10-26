@@ -24,6 +24,7 @@ func TestLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	t.Logf("format: %+v", f)
 	// Check for known meta data values (ffprobe -i compressed.m4a).
 	if f.BitDepth != 2 {
 		t.Fatalf("unexpected bit depth: want 2, got %d", f.BitDepth)
@@ -43,22 +44,32 @@ func TestLoad(t *testing.T) {
 	}
 }
 
-// // TestDecode ensures that output from the native decoders are similar to
-// // the output of ffmpeg.
-// func TestDecode(t *testing.T) {
-// 	by, f, err := nativeaudio.Decode(compressed)
-// 	if err != nil {
-// 		t.Fatalf("unexpected error: %v", err)
-// 	}
-// 	t.Logf("format: %+v", f)
-// 	// Test passes on exact match, otherwise do a tolerance test.
-// 	if bytes.Equal(by, uncompressed) {
-// 		return
-// 	}
-// 	if !equal(t, by, uncompressed) {
-// 		t.Fatalf("native output does not match ffmpeg output")
-// 	}
-// }
+// TestDecode ensures that output from the native decoders are similar to
+// the output of ffmpeg.
+func TestDecode(t *testing.T) {
+	by, f, err := nativeaudio.Decode(compressed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	t.Logf("format: %+v", f)
+	// Check for known meta data values (ffprobe -i compressed.m4a).
+	if f.BitDepth != 2 {
+		t.Fatalf("unexpected bit depth: want 2, got %d", f.BitDepth)
+	}
+	if f.SampleRate != 44100 {
+		t.Fatalf("unexpected sample rate: want 44100, got %d", f.SampleRate)
+	}
+	if f.Channels != 2 {
+		t.Fatalf("unexpected channel count: want 2, got %d", f.Channels)
+	}
+	// Test passes on exact match, otherwise do a tolerance test.
+	if bytes.Equal(by, uncompressed) {
+		return
+	}
+	if !equal(t, by, uncompressed) {
+		t.Fatalf("native output does not match ffmpeg output")
+	}
+}
 
 // equal decodes the PCM samples and tests if they are "close enough"
 // using a heuristic tolerance.
