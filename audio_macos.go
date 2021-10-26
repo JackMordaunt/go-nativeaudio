@@ -4,10 +4,15 @@ package nativeaudio
 
 // play stub for macOS.
 func play(path string) error {
-	return ffmpegPlay(path)
+	return FFmpegPlay(path)
 }
 
 // load stub for macOS.
 func load(path string) ([]byte, error) {
-	return ffmpegLoad(path)
+	return FFmpegLoad(path)
+}
+
+// decode stub for macOS.
+func decode(by []byte) ([]byte, Format, error) {
+	return FFmpegDecode(by)
 }

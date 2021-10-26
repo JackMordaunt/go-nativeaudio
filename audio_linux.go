@@ -4,10 +4,15 @@ package nativeaudio
 
 // play stub for Linux.
 func play(path string) error {
-	return ffmpegPlay(path)
+	return FFmpegPlay(path)
 }
 
 // load stub for Linux.
-func load(path string) ([]byte, error) {
-	return ffmpegLoad(path)
+func load(path string) ([]byte, Format, error) {
+	return FFmpegLoad(path)
+}
+
+// decode stub for Linux.
+func decode(by []byte) ([]byte, Format, error) {
+	return FFmpegDecode(by)
 }

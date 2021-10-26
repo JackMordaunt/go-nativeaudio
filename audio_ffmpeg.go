@@ -9,17 +9,18 @@ package nativeaudio
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 )
 
-// play an audio file with ffplay.
+// FFmpegPlay an audio file with ffplay.
 //
 // 	ffplay -vn <path> -nodisp -autoexit
 //
 // -vn: no video,
 // -nodisp: do not launch graphical window,
 // -autoexit: exit the process after playback is complete.
-func ffmpegPlay(path string) error {
+func FFmpegPlay(path string) error {
 	if out, err := exec.Command(
 		"ffplay",
 		"-vn",
@@ -32,13 +33,13 @@ func ffmpegPlay(path string) error {
 	return nil
 }
 
-// load raw PCM with ffmpeg.
+// FFmpegLoad raw PCM with ffmpeg.
 //
 // 	ffmpeg -i <path> -f s16le -
 //
 // s16le is the PCM format specifier, the final dash means "pipe to
 // stdout".
-func ffmpegLoad(path string) ([]byte, error) {
+func FFmpegLoad(path string) ([]byte, Format, error) {
 	buffer := bytes.NewBuffer(nil)
 	cmd := exec.Command(
 		"ffmpeg",
@@ -48,7 +49,35 @@ func ffmpegLoad(path string) ([]byte, error) {
 	)
 	cmd.Stdout = buffer
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("ffmpeg: %w", err)
+		return nil, Format{}, fmt.Errorf("ffmpeg: %w", err)
 	}
-	return buffer.Bytes(), nil
+	return buffer.Bytes(), Format{}, nil
+}
+
+// FFmpegDecode raw PCM with ffmpeg.
+//
+// 	ffmpeg -f m4a -i pipe: -f s16le -
+//
+// s16le is the PCM format specifier, the final dash means "pipe to
+// stdout".
+//
+// NOTE(jfm): unfortunately, some formats cannot be piped, so we will
+// create a temporary file instead.
+func FFmpegDecode(by []byte) ([]byte, Format, error) {
+	if err := os.WriteFile("tmp", by, 0644); err != nil {
+		return nil, Format{}, fmt.Errorf("creating tmp file: %w", err)
+	}
+	defer os.Remove("tmp")
+	buffer := bytes.NewBuffer(nil)
+	cmd := exec.Command(
+		"ffmpeg",
+		"-i", "tmp",
+		"-f", "s16le",
+		"-",
+	)
+	cmd.Stdout = buffer
+	if err := cmd.Run(); err != nil {
+		return nil, Format{}, fmt.Errorf("ffmpeg: %w", err)
+	}
+	return buffer.Bytes(), Format{}, nil
 }
