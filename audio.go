@@ -16,7 +16,7 @@ func Play(path string) error {
 
 // Load compressed data, returning the uncompressed data as PCM data
 // (s16le) and details about the PCM required to playback correctly.
-func Load(path string) (uncompressed []byte, err error) {
+func Load(path string) (uncompressed []byte, format Format, err error) {
 	return load(path)
 }
 

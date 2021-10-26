@@ -13,16 +13,26 @@ import (
 var (
 	//go:embed compressed.m4a
 	compressed []byte
-	//go:embed uncompressed.pcm
+	//go:embed uncompressed.s16le.pcm
 	uncompressed []byte
 )
 
 // TestLoad ensures that output from the native decoders are close to
 // the output of ffmpeg.
 func TestLoad(t *testing.T) {
-	by, err := nativeaudio.Load("compressed.m4a")
+	by, f, err := nativeaudio.Load("compressed.m4a")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	// Check for known meta data values (ffprobe -i compressed.m4a).
+	if f.BitDepth != 2 {
+		t.Fatalf("unexpected bit depth: want 2, got %d", f.BitDepth)
+	}
+	if f.SampleRate != 44100 {
+		t.Fatalf("unexpected sample rate: want 44100, got %d", f.SampleRate)
+	}
+	if f.Channels != 2 {
+		t.Fatalf("unexpected channel count: want 2, got %d", f.Channels)
 	}
 	// Test passes on exact match, otherwise do a tolerance test.
 	if bytes.Equal(by, uncompressed) {

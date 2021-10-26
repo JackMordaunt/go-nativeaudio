@@ -13,6 +13,7 @@
 #include <mfreadwrite.h>
 #include <shlwapi.h>
 #include <assert.h>
+#include <stdint.h>
 
 // Error declares an error return containing a message and possibly
 // wrapping another error.
@@ -41,9 +42,9 @@ typedef struct Result
 // Format describes uncompressed PCM necessary for correct playback. 
 typedef struct Format
 {
-        int SampleRate;
-        int Channels;
-        int BitDepth; 
+        uint32_t SampleRate;
+        uint32_t Channels;
+        uint32_t BitDepth; 
 } Format;
 
 
@@ -55,6 +56,15 @@ typedef struct Buffer
         int Cap;    // Capacity is the total allocated memory. 
         BYTE* Data; // Data is the pointer to the first byte. 
 } Buffer; 
+
+
+
+// FormatResult captures the result of decoding an audio buffer. 
+typedef struct FormatResult
+{
+        Format Format;
+        Error* Err;
+} FormatResult;
 
 
 // DecodeResult captures the result of decoding an audio buffer. 
@@ -78,7 +88,7 @@ void ErrorFree(Error*);
 // what a wild ride that is.
 //
 // https://docs.microsoft.com/en-us/windows/win32/medfound/about-the-media-foundation-sdk
-Result Load(char* path);
+DecodeResult Load(char* path);
 
 // Play an audio file at the given file path.
 //

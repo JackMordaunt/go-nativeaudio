@@ -37,17 +37,22 @@ func play(path string) error {
 // and passing it in for C to fill up. It would require more
 // orchestration, but would save the copy. At the moment, C allocates
 // its own buffer, we then copy the data and free the C buffer.
-func load(path string) ([]byte, error) {
+func load(path string) ([]byte, Format, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
-	result := C.Load(cPath)
-	if result.Err != nil {
+	r := C.Load(cPath)
+	if r.Err != nil {
 		// defer C.ErrorFree(result.Err)
-		return nil, collectErrors(result.Err)
+		return nil, Format{}, collectErrors(r.Err)
 	}
-	buffer := (*C.Buffer)(result.Value)
-	defer C.BufferFree(buffer)
-	return C.GoBytes(unsafe.Pointer(buffer.Data), buffer.Len), nil
+	defer C.BufferFree(r.Uncompressed)
+	uncompressed := C.GoBytes(unsafe.Pointer(r.Uncompressed.Data), r.Uncompressed.Len)
+	format := Format{
+		SampleRate: int(r.Format.SampleRate),
+		BitDepth:   int(r.Format.BitDepth),
+		Channels:   int(r.Format.Channels),
+	}
+	return uncompressed, format, nil
 }
 
 // decode compressed data, returning the uncompressed data as PCM data

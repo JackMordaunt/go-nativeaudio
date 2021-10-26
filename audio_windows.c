@@ -998,22 +998,94 @@ cleanup:
         return r;
 }
 
+// GetFormat reads format meta data from a source reader. 
+FormatResult 
+GetFormat(IMFSourceReader * reader) 
+{
+        IMFMediaType * m_type = NULL;
+        HRESULT hr = S_OK;
+        FormatResult r = {
+                .Format = {},
+                .Err = NULL,
+        };
 
-Result
+        hr = reader->lpVtbl->GetCurrentMediaType(reader, (DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM, &m_type);
+
+        if (FAILED(hr))
+        {
+                r.Err = ErrorWithCode(ErrorStr("getting media type"), hr);
+                goto cleanup;
+        }
+        
+        UINT32 num_channels = 0;
+
+        hr = m_type->lpVtbl->GetUINT32(m_type, &MF_MT_AUDIO_NUM_CHANNELS, &num_channels);
+
+        if (FAILED(hr))
+        {
+                r.Err = ErrorWithCode(ErrorStr("getting num channels"), hr);
+                goto cleanup;
+        }
+
+        UINT32 sample_rate = 0;
+
+        hr = m_type->lpVtbl->GetUINT32(m_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND, &sample_rate);
+
+        if (FAILED(hr))
+        {
+                r.Err = ErrorWithCode(ErrorStr("getting num channels"), hr);
+                goto cleanup;
+        }
+        
+
+        UINT32 bits_per_sample = 0;
+
+        hr = m_type->lpVtbl->GetUINT32(m_type, &MF_MT_AUDIO_BITS_PER_SAMPLE, &bits_per_sample);
+
+        if (FAILED(hr))
+        {
+                r.Err = ErrorWithCode(ErrorStr("getting num channels"), hr);
+                goto cleanup;
+        }
+        
+        printf("sample rate: %d\n", sample_rate);
+        printf("num channels: %d\n", num_channels);
+        printf("bits per sample: %d\n", bits_per_sample);
+
+cleanup:
+
+        if (m_type != NULL)
+        {
+                m_type->lpVtbl->Release(m_type);
+        }
+
+        r.Format = (Format){
+                .SampleRate = sample_rate,
+                .Channels = num_channels,
+                .BitDepth = bits_per_sample / 8,
+        };
+
+        printf(".SampleRate: %d\n", r.Format.SampleRate);
+        printf(".Channels: %d\n", r.Format.Channels);
+        printf(".BitDepth: %d\n", r.Format.BitDepth);
+
+        return r;
+}
+
+// Load decodes the file at path and returns raw PCM s16le with the 
+// given format required for correct playback. 
+DecodeResult
 Load(char* path)
 {
-        Result r; 
+        IMFSourceReader *reader = NULL;         // Object to stream bytes from.
+        Buffer *buffer = NULL;                  // Buffer to accumulate decoded PCM and return to Go.
         Error *err = NULL;                      // Dyanmic error. 
         HRESULT hr = S_OK;                      // Windows return code.
-        IMFSourceReader *reader = NULL;         // Object to stream bytes from.
-        DWORD cbBuffer = 0;                     // size of chunk.
-        BYTE *chunk = NULL;                     // pointer to start of chunk.
-        IMFSample *pSample = NULL;              // sample object containing on or more streams.
-        IMFMediaBuffer *bufferReader = NULL;    // buffer object containing the raw buffer.
-        Buffer *buffer = NULL;                  // Buffer to accumulate decoded PCM and return to Go.
-
-        LONGLONG prev_time_stamp = -1; 
-        LONGLONG time_stamp = 0;
+        DecodeResult dr = {
+                .Err = NULL,
+                .Uncompressed = NULL,
+                .Format = {}
+        };
 
         hr = MFStartup(MF_VERSION, MFSTARTUP_FULL);
 
@@ -1023,104 +1095,33 @@ Load(char* path)
                 goto cleanup;
         }
 
-        r = NewSourceReaderForFile(path);
+        Result r = NewSourceReaderForFile(path);
         
         if (r.Err != NULL)
         {
-                err = ErrorWrap(r.Err, "setting up source reader for audio file");
+                dr.Err = ErrorWrap(r.Err, "setting up source reader for audio file");
                 goto cleanup;
         }
 
         reader = (IMFSourceReader*)(r.Value);
 
+        FormatResult fr = GetFormat(reader);
+        if (fr.Err != NULL)
+        {
+                dr.Err = ErrorWrap(fr.Err, "getting format");
+                goto cleanup;
+        }
+
         // Heap allocated buffer to accumulate the audio data. 
         // NOTE(jfm): Free from cgo side with BufferFree().
         buffer = BufferNew(); 
 
-        // Stream all the data into a byte buffer.
-
-        // NOTE(jfm): we can create a streaming api by extracting this loop
-        // to the Go side, and implement something like an io.Reader. 
-        // However this api currently reads the entire thing and passes
-        // it all back to Go at once. 
-        while (1) {
-                DWORD dwFlags = 0;
-
-                // Read the next sample.
-                hr = reader->lpVtbl->ReadSample(
-                        reader,
-                        (DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM,
-                        0,
-                        NULL,
-                        &dwFlags,
-                        &time_stamp,
-                        &pSample
-                );
-
-                // NOTE(jfm): Avoid chunks that we have already seen. 
-                //
-                // For some reason, ReadSample can produce more than
-                // one sample at time stamp "0". 
-                //
-                // Emitting all of them produces both larger files and
-                // audio artefacts. 
-                if (time_stamp == prev_time_stamp) 
-                {
-                        continue;
-                }
-
-                prev_time_stamp = time_stamp;
-
-                if (FAILED(hr))
-                {
-                        err = ErrorWithCode(ErrorStr("reading sample"), hr);
-                        goto cleanup;
-                }
-
-                if (dwFlags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED)
-                {
-                        break;
-                }
-                if (dwFlags & MF_SOURCE_READERF_ENDOFSTREAM)
-                {
-                        break;
-                }
-
-                if (pSample == NULL)
-                {
-                        continue;
-                }
-
-                // Get a pointer to the buffer object.
-                hr = pSample->lpVtbl->ConvertToContiguousBuffer(pSample, &bufferReader);
-
-                if (FAILED(hr))
-                {
-                        err = ErrorWithCode(ErrorStr("converting to contiguous buffer"), hr);
-                        goto cleanup;
-                }
-
-                // Get read/write access to the next chunk of audio data.
-                hr = bufferReader->lpVtbl->Lock(bufferReader, &chunk, NULL, &cbBuffer);
-
-                if (FAILED(hr))
-                {
-                        err = ErrorWithCode(ErrorStr("locking buffer"), hr);
-                        goto cleanup;
-                }
+        err = decode(reader, &buffer);
         
-                BufferWrite(buffer, cbBuffer, chunk);
-
-                // Unlock the reader that we just copied from.
-                hr = bufferReader->lpVtbl->Unlock(bufferReader);
-
-                if (FAILED(hr))
-                {
-                        err = ErrorWithCode(ErrorStr("unlocking buffer"), hr);
-                        goto cleanup;
-                }
-
-                chunk = NULL;
+        if (err != NULL) 
+        {
+                dr.Err = ErrorWrap(err, "decode minor");
+                goto cleanup;
         }
 
 cleanup:
@@ -1131,10 +1132,8 @@ cleanup:
                 reader->lpVtbl->Release(reader);
         }
 
-        if (bufferReader != NULL) 
-        {
-                bufferReader->lpVtbl->Release(bufferReader);
-        }
-        
-        return NewResult(buffer, err);
+        dr.Uncompressed = buffer;
+        dr.Format = fr.Format;
+
+        return dr;
 }
