@@ -37,7 +37,7 @@ func play(path string) error {
 // and passing it in for C to fill up. It would require more
 // orchestration, but would save the copy. At the moment, C allocates
 // its own buffer, we then copy the data and free the C buffer.
-func load(path string) ([]byte, Format, error) {
+func load(path string) (uncompressed []byte, format Format, err error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 	r := C.Load(cPath)
@@ -45,9 +45,11 @@ func load(path string) ([]byte, Format, error) {
 		defer C.ErrorFree(r.Err)
 		return nil, Format{}, collectErrors(r.Err)
 	}
-	defer C.BufferFree(r.Uncompressed)
-	uncompressed := C.GoBytes(unsafe.Pointer(r.Uncompressed.Data), r.Uncompressed.Len)
-	format := Format{
+	uncompressed = goBytes(unsafe.Pointer(r.Uncompressed.Data), int(r.Uncompressed.Len))
+	runtime.SetFinalizer(&uncompressed, func(_ *[]byte) {
+		C.BufferFree(r.Uncompressed)
+	})
+	format = Format{
 		SampleRate: int(r.Format.SampleRate),
 		BitDepth:   int(r.Format.BitDepth),
 		Channels:   int(r.Format.Channels),
@@ -59,19 +61,34 @@ func load(path string) ([]byte, Format, error) {
 // (s16le) and details about the PCM required to playback correctly.
 func decode(compressed []byte) (uncompressed []byte, format Format, err error) {
 	defer runtime.KeepAlive(compressed)
-	r := C.Decode((*C.uchar)(unsafe.Pointer(&compressed[0])), C.uint(len(compressed)))
+	r := C.Decode(cBytes(compressed))
 	if r.Err != nil && r.Err.Str != nil {
 		defer C.ErrorFree(r.Err)
 		return nil, format, collectErrors(r.Err)
 	}
-	defer C.BufferFree(r.Uncompressed)
-	uncompressed = C.GoBytes(unsafe.Pointer(r.Uncompressed.Data), r.Uncompressed.Len)
+	uncompressed = goBytes(unsafe.Pointer(r.Uncompressed.Data), int(r.Uncompressed.Len))
+	runtime.SetFinalizer(&uncompressed, func(_ *[]byte) {
+		C.BufferFree(r.Uncompressed)
+	})
 	format = Format{
 		Channels:   int(r.Format.Channels),
 		BitDepth:   int(r.Format.BitDepth),
 		SampleRate: int(r.Format.SampleRate),
 	}
 	return uncompressed, format, nil
+}
+
+// goBytes returns a slice backed by a C byte array.
+//
+// [1 << 30] means assume backing array is huge, and then slice into it
+// with length.
+func goBytes(ptr unsafe.Pointer, length int) []byte {
+	return (*[1 << 30]byte)(ptr)[:length:length]
+}
+
+// cBytes returns a dynamic C byte array backed by a Go slice.
+func cBytes(by []byte) (*C.uchar, C.uint) {
+	return (*C.uchar)(unsafe.Pointer(&by[0])), C.uint(len(by))
 }
 
 // collectErrors unwraps all the errors in the chain and coalesces them
