@@ -2,10 +2,10 @@
 
 package nativeaudio
 
-// -g: includes dwarf debug data
+// -g: add to CFLAGS to include dwarf debug data
 
 /*
-#cgo CFLAGS: -Wall -Werror -g
+#cgo CFLAGS: -Wall -Werror
 #cgo LDFLAGS: -lWinmm -lMf -lMfplat  -lMfuuid -loleaut32 -limm32 -lversion -lWindowsApp -lMfreadwrite -lShlwapi
 #include "audio_windows.h"
 */
