@@ -122,3 +122,26 @@ func abs(n int) int {
 	}
 	return n
 }
+
+func BenchmarkDecode(b *testing.B) {
+	b.Run("native", func(b *testing.B) {
+		for ii := 0; ii < b.N; ii++ {
+			by, f, err := nativeaudio.Load("compressed.m4a")
+			if err != nil {
+				b.Fatalf("unexpected error during decode: %v", err)
+			}
+			_ = by
+			_ = f
+		}
+	})
+	b.Run("ffmpeg", func(b *testing.B) {
+		for ii := 0; ii < b.N; ii++ {
+			by, f, err := nativeaudio.FFmpegLoad("compressed.m4a")
+			if err != nil {
+				b.Fatalf("unexpected error during decode: %v", err)
+			}
+			_ = by
+			_ = f
+		}
+	})
+}
