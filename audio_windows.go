@@ -57,11 +57,9 @@ func load(path string) ([]byte, Format, error) {
 
 // decode compressed data, returning the uncompressed data as PCM data
 // (s16le) and details about the PCM required to playback correctly.
-//
-// TODO(jfm) [perf]: avoid copying buffer in (CBytes does a copy).
 func decode(compressed []byte) (uncompressed []byte, format Format, err error) {
 	defer runtime.KeepAlive(compressed)
-	r := C.Decode((*C.uchar)(C.CBytes(compressed)), C.uint(len(compressed)))
+	r := C.Decode((*C.uchar)(unsafe.Pointer(&compressed[0])), C.uint(len(compressed)))
 	if r.Err != nil && r.Err.Str != nil {
 		defer C.ErrorFree(r.Err)
 		return nil, format, collectErrors(r.Err)

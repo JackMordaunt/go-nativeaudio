@@ -124,7 +124,7 @@ func abs(n int) int {
 }
 
 func BenchmarkDecode(b *testing.B) {
-	b.Run("native", func(b *testing.B) {
+	b.Run("native-load", func(b *testing.B) {
 		for ii := 0; ii < b.N; ii++ {
 			by, f, err := nativeaudio.Load("compressed.m4a")
 			if err != nil {
@@ -134,7 +134,17 @@ func BenchmarkDecode(b *testing.B) {
 			_ = f
 		}
 	})
-	b.Run("ffmpeg", func(b *testing.B) {
+	b.Run("native-decode", func(b *testing.B) {
+		for ii := 0; ii < b.N; ii++ {
+			by, f, err := nativeaudio.Decode(compressed)
+			if err != nil {
+				b.Fatalf("unexpected error during decode: %v", err)
+			}
+			_ = by
+			_ = f
+		}
+	})
+	b.Run("ffmpeg-load", func(b *testing.B) {
 		for ii := 0; ii < b.N; ii++ {
 			by, f, err := nativeaudio.FFmpegLoad("compressed.m4a")
 			if err != nil {
