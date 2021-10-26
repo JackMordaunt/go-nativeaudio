@@ -14,8 +14,22 @@ func Play(path string) error {
 	return play(path)
 }
 
-// Load decode and buffer an audio file. The buffer should contain raw
-// PCM data (s16le).
-func Load(path string) (pcm []byte, err error) {
+// Load compressed data, returning the uncompressed data as PCM data
+// (s16le) and details about the PCM required to playback correctly.
+func Load(path string) (uncompressed []byte, err error) {
 	return load(path)
+}
+
+// Decode compressed data, returning the uncompressed data as PCM data
+// (s16le) and details about the PCM required to playback correctly.
+func Decode(compressed []byte) (uncompressed []byte, format Format, err error) {
+	return decode(compressed)
+}
+
+// Format desribes the features of the associated PCM data necessary
+// for correct playback.
+type Format struct {
+	SampleRate int
+	Channels   int
+	BitDepth   int
 }

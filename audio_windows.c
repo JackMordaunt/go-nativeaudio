@@ -28,6 +28,7 @@ ErrorWithCode(Error *err, int code)
 }
 
 // ErrorFree deallocates the error and any wrapped errors. 
+// BUG: heap corruption. 
 void 
 ErrorFree(Error* err)
 {
@@ -37,10 +38,10 @@ ErrorFree(Error* err)
         while (err != NULL) 
         {
                 cursor = err;
-                err = err->Err;
                 if (cursor->Str != NULL)
                         free(cursor->Str);
                 free(cursor);
+                err = err->Err;
         }
 }
 
@@ -74,7 +75,8 @@ CharWiden(char* str)
 
 // RunMediaSession executes the media session until complete. This
 // should output the sound.
-HRESULT RunMediaSession(IMFMediaSession* pSession){
+HRESULT
+RunMediaSession(IMFMediaSession* pSession){
 
     HRESULT hr = S_OK;
 
@@ -429,7 +431,7 @@ Play(char* path)
         audio_file_path = (WCHAR*)r.Value;
 
         // Start the platform.
-        if ((hr = MFStartup(MF_VERSION, MFSTARTUP_FULL)) != S_OK)
+        if ((hr = MFStartup(MF_VERSION, MFSTARTUP_LITE)) != S_OK)
         {
                 err = ErrorWithCode(ErrorStr("starting media platform"), hr);
                 goto cleanup;
@@ -441,7 +443,6 @@ Play(char* path)
         {
                 err = ErrorWithCode(ErrorStr("creating media session"), hr);
                 goto cleanup;
-
         }
         
         // Create a source resolver. This object can open files and urls.
@@ -449,9 +450,8 @@ Play(char* path)
         {
                 err = ErrorWithCode(ErrorStr("creating source resolver"), hr);
                 goto cleanup;
-
         }
-        
+
         // Create a "media source" from the sound file.
         // Perhaps a bytestream would also work?
         if ((hr = resolver->lpVtbl->CreateObjectFromURL(
@@ -465,14 +465,12 @@ Play(char* path)
         {
                 err = ErrorWithCode(ErrorStr("creating object from url"), hr);
                 goto cleanup;
-
         }
         
         if (obj_type != MF_OBJECT_MEDIASOURCE)
         {
                 err = ErrorWithCode(ErrorStr("not a media source"), hr);
                 goto cleanup;
-
         }
 
         // We know it's a media source so we can do the cast safely. 
@@ -485,7 +483,6 @@ Play(char* path)
         {
                 err = ErrorWithCode(ErrorStr("creating presentation descriptor"), hr);
                 goto cleanup;
-
         }
         
         // Get information about the audio stream. We pull the count
@@ -495,7 +492,6 @@ Play(char* path)
         {
                 err = ErrorWithCode(ErrorStr("getting stream descriptor count"), hr);
                 goto cleanup;
-
         }
         
         if (stream_count != 1)
@@ -509,42 +505,36 @@ Play(char* path)
         {
                 err = ErrorWithCode(ErrorStr("getting stream descriptor by index"), hr);
                 goto cleanup;
-
         }
         
         if (!fSelected)
         {
                 err = ErrorWithCode(ErrorStr("stream was not selected"), hr);
                 goto cleanup;
-
         }
 
         if ((hr = MFCreateAudioRendererActivate(&activate)) != S_OK)
         {
                 err = ErrorWithCode(ErrorStr("creating audio renderer activate"), hr);
                 goto cleanup;
-
         }
 
         if ((hr = MFCreateTopology(&topology)) != S_OK)
         {
                 err = ErrorWithCode(ErrorStr("creating topology"), hr);
                 goto cleanup;
-
         }
 
         if ((hr = AddSourceNode(topology, src, desc, stream_desc, &pSourceNode)) != S_OK)
         {
                 err = ErrorWithCode(ErrorStr("adding source node"), hr);
                 goto cleanup;
-
         }
         
         if ((hr = AddOutputNode(topology, (IMFStreamSink *)activate, &pOutputNode)) != S_OK)
         {
                 err = ErrorWithCode(ErrorStr("adding output node"), hr);
                 goto cleanup;
-
         }
 
         if ((hr = pSourceNode->lpVtbl->ConnectOutput(pSourceNode, 0, pOutputNode, 0)) != S_OK)
@@ -557,7 +547,6 @@ Play(char* path)
         {
                 err = ErrorWithCode(ErrorStr("setting topology on session: %ld\n"), hr);
                 goto cleanup;
-
         }
         
         hr = RunMediaSession(session);
@@ -738,6 +727,277 @@ cleanup:
         
         return r;
 }
+
+// decode buffers the decoded PCM data and returns it via out. 
+//
+// By default an unconfigured AAC decoder will output PCM 16le which is
+// luckily what we need. 
+Error*
+decode(IMFSourceReader * reader, Buffer ** out)
+{
+        assert(reader);
+
+        IMFMediaBuffer *bufferReader = NULL; // buffer object containing the raw buffer.
+        LONGLONG prev_time_stamp = -1; 
+        IMFSample *pSample = NULL;           // sample object containing on or more streams.
+        LONGLONG time_stamp = 0;
+        Buffer *buffer = NULL;               // Buffer to accumulate decoded PCM and return to Go.
+        BYTE *chunk = NULL;                  // pointer to start of chunk.
+        DWORD cbBuffer = 0;                  // size of chunk.
+        HRESULT hr = S_OK;
+        Error *err = NULL;
+
+        // Heap allocated buffer to accumulate the audio data. 
+        // NOTE(jfm): Free from cgo side with BufferFree().
+        buffer = BufferNew(); 
+
+        // Stream all the data into a byte buffer.
+
+        // NOTE(jfm): we can create a streaming api by extracting this loop
+        // to the Go side, and implement something like an io.Reader. 
+        // However this api currently reads the entire thing and passes
+        // it all back to Go at once. 
+        while (1) {
+                DWORD dwFlags = 0;
+
+                // Read the next sample.
+                hr = reader->lpVtbl->ReadSample(
+                        reader,
+                        (DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+                        0,
+                        NULL,
+                        &dwFlags,
+                        &time_stamp,
+                        &pSample
+                );
+
+                // NOTE(jfm): Avoid chunks that we have already seen. 
+                //
+                // For some reason, ReadSample can produce more than
+                // one sample at time stamp "0". 
+                //
+                // Emitting all of them produces both larger files and
+                // audio artefacts. 
+                if (time_stamp == prev_time_stamp) 
+                {
+                        continue;
+                }
+
+                prev_time_stamp = time_stamp;
+
+                if (FAILED(hr))
+                {
+                        err = ErrorWithCode(ErrorStr("reading sample"), hr);
+                        goto cleanup;
+                }
+
+                if (dwFlags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED)
+                {
+                        break;
+                }
+                if (dwFlags & MF_SOURCE_READERF_ENDOFSTREAM)
+                {
+                        break;
+                }
+
+                if (pSample == NULL)
+                {
+                        continue;
+                }
+
+                // Get a pointer to the buffer object.
+                hr = pSample->lpVtbl->ConvertToContiguousBuffer(pSample, &bufferReader);
+
+                if (FAILED(hr))
+                {
+                        err = ErrorWithCode(ErrorStr("converting to contiguous buffer"), hr);
+                        goto cleanup;
+                }
+
+                // Get read/write access to the next chunk of audio data.
+                hr = bufferReader->lpVtbl->Lock(bufferReader, &chunk, NULL, &cbBuffer);
+
+                if (FAILED(hr))
+                {
+                        err = ErrorWithCode(ErrorStr("locking buffer"), hr);
+                        goto cleanup;
+                }
+        
+                BufferWrite(buffer, cbBuffer, chunk);
+
+                // Unlock the reader that we just copied from.
+                hr = bufferReader->lpVtbl->Unlock(bufferReader);
+
+                if (FAILED(hr))
+                {
+                        err = ErrorWithCode(ErrorStr("unlocking buffer"), hr);
+                        goto cleanup;
+                }
+
+                chunk = NULL;
+        }
+
+        *out = buffer;
+
+cleanup:
+
+        if (pSample != NULL)
+        {
+                pSample->lpVtbl->Release(pSample);
+        }
+
+        if (bufferReader != NULL) 
+        {
+                bufferReader->lpVtbl->Release(bufferReader);
+        }
+
+        return err;
+}
+
+// Decode the compresed audio data into uncompressed s16le PCM. 
+//
+// We get a bit lucky here because Media Foundation defaults to that
+// PCM format when it auto-inits the AAC decoder. 
+// 
+// For different input formats (other than AAC) the PCM format may not
+// be guaranteed. 
+DecodeResult
+Decode(BYTE* compressed, UINT size)
+{
+        assert(compressed);
+
+        HRESULT hr = S_OK;
+        DecodeResult r = {
+                .Uncompressed = NULL,
+                .Format = { .Channels = 0, .SampleRate = 0, .BitDepth = 0},
+                .Err = NULL,
+        };
+
+        hr = MFStartup(MF_VERSION, MFSTARTUP_LITE);
+
+        if (FAILED(hr))
+        {
+                r.Err = ErrorWithCode(ErrorStr("initializing media foundation"), hr);
+                goto cleanup;
+        }
+
+        IMFByteStream *stream = NULL;
+        IStream *mem_stream = SHCreateMemStream(compressed, size);
+
+        hr = MFCreateMFByteStreamOnStream(mem_stream, &stream);
+
+        if (FAILED(hr)) 
+        {
+                r.Err = ErrorWithCode(ErrorStr("creating byte stream"), hr);
+                goto cleanup;
+        }
+
+        IMFSourceReader *reader = NULL;
+        hr = MFCreateSourceReaderFromByteStream(stream, NULL, &reader);
+
+        if (FAILED(hr))
+        {
+                r.Err = ErrorWithCode(ErrorStr("creating source reader from byte stream"), hr);
+                goto cleanup;
+        }
+
+        // Deselect all streams and then select the first audio stream. 
+        
+        hr = reader->lpVtbl->SetStreamSelection(reader, MF_SOURCE_READER_ALL_STREAMS, FALSE);
+        
+        if (FAILED(hr))
+        {
+                r.Err = ErrorWithCode(ErrorStr("deslecting all streams"), hr);
+                goto cleanup;
+        }
+
+        hr = reader->lpVtbl->SetStreamSelection(reader, MF_SOURCE_READER_FIRST_AUDIO_STREAM, TRUE);
+        
+        if (FAILED(hr))
+        {
+                r.Err = ErrorWithCode(ErrorStr("selecting first audio stream"), hr);
+                goto cleanup;
+        }
+
+        IMFMediaType * m_type = NULL;
+
+        hr = reader->lpVtbl->GetCurrentMediaType(
+                reader,
+                (DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+                &m_type
+        );
+
+        if (FAILED(hr))
+        {
+                r.Err = ErrorWithCode(ErrorStr("getting media type"), hr);
+                goto cleanup;
+        }
+
+        // WAVE format gives us the right meta data, so we'll use it. 
+        //
+        // Format tag == 5648 (MPEG_HEAAC)
+        WAVEFORMATEX * format = NULL;
+        hr = MFCreateWaveFormatExFromMFMediaType(
+                m_type,
+                &format,
+                NULL,
+                MFWaveFormatExConvertFlag_Normal
+        );
+
+        if (FAILED(hr))
+        {
+                r.Err = ErrorWithCode(ErrorStr("getting meta data"), hr);
+                goto cleanup;
+        }
+
+        assert(format);
+
+        Buffer * buffer = NULL;
+
+        r.Err = decode(reader, &buffer);
+
+        if (r.Err != NULL) 
+        {
+                r.Err = ErrorWrap(r.Err, "decode minor");
+        }
+
+        assert(buffer);
+
+cleanup:
+
+        if (stream != NULL)
+        {
+                stream->lpVtbl->Release(stream);
+        }
+
+        if (reader != NULL)
+        {
+                reader->lpVtbl->Release(reader);
+        }
+
+        hr = MFShutdown();
+
+        if (FAILED(hr)) 
+        {
+                // Capture the shutdown error only if we didn't already encounter one. 
+                if (r.Err == NULL) 
+                {
+                        r.Err = ErrorWithCode(ErrorStr("shutting down media foundation"), hr);
+                }
+        }
+
+        if (buffer != NULL)
+        {
+                r.Uncompressed = buffer;
+        }
+
+        r.Format.SampleRate = format->nSamplesPerSec;
+        r.Format.BitDepth = format->wBitsPerSample/8;
+        r.Format.Channels = format->nChannels;
+
+        return r;
+}
+
 
 Result
 Load(char* path)

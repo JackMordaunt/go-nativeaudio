@@ -33,6 +33,23 @@ func TestLoad(t *testing.T) {
 	}
 }
 
+// // TestDecode ensures that output from the native decoders are similar to
+// // the output of ffmpeg.
+// func TestDecode(t *testing.T) {
+// 	by, f, err := nativeaudio.Decode(compressed)
+// 	if err != nil {
+// 		t.Fatalf("unexpected error: %v", err)
+// 	}
+// 	t.Logf("format: %+v", f)
+// 	// Test passes on exact match, otherwise do a tolerance test.
+// 	if bytes.Equal(by, uncompressed) {
+// 		return
+// 	}
+// 	if !equal(t, by, uncompressed) {
+// 		t.Fatalf("native output does not match ffmpeg output")
+// 	}
+// }
+
 // equal decodes the PCM samples and tests if they are "close enough"
 // using a heuristic tolerance.
 //

@@ -5,12 +5,14 @@
 #include <winbase.h>
 #include <combaseapi.h>
 #include <mfapi.h>
-#include <mfidl.h>
+#include <Mfidl.h>
 #include <mferror.h>
 #include <initguid.h>
 #include <wmcodecdsp.h>
 #include <mmdeviceapi.h>
 #include <mfreadwrite.h>
+#include <shlwapi.h>
+#include <assert.h>
 
 // Error declares an error return containing a message and possibly
 // wrapping another error.
@@ -35,6 +37,16 @@ typedef struct Result
         Error* Err;
 } Result;
 
+
+// Format describes uncompressed PCM necessary for correct playback. 
+typedef struct Format
+{
+        int SampleRate;
+        int Channels;
+        int BitDepth; 
+} Format;
+
+
 // Buffer describes a dynamic byte buffer with a length, capacity and 
 // a pointer to the first element. 
 typedef struct Buffer
@@ -43,6 +55,15 @@ typedef struct Buffer
         int Cap;    // Capacity is the total allocated memory. 
         BYTE* Data; // Data is the pointer to the first byte. 
 } Buffer; 
+
+
+// DecodeResult captures the result of decoding an audio buffer. 
+typedef struct DecodeResult
+{
+        Buffer* Uncompressed;
+        Format Format;
+        Error* Err;
+} DecodeResult;
 
 // BufferFree deallocates the memory for a buffer, including the pointer
 // to it and it's pointer to the raw data. 
@@ -66,3 +87,15 @@ Result Load(char* path);
 //
 // https://docs.microsoft.com/en-us/windows/win32/medfound/about-the-media-foundation-sdk
 Error* Play(char *path);
+
+// Decode a buffer of compressed audio using Windows Media Foundation. 
+DecodeResult Decode(BYTE* compressed, UINT size);
+
+// TODO: native volume (https://docs.microsoft.com/en-us/windows/win32/api/mfidl/nn-mfidl-imfaudiostreamvolume)
+
+
+// Stub. 
+HRESULT MFCreateMFByteStreamOnStream(
+        IStream       *pStream,
+        IMFByteStream **ppByteStream
+);
