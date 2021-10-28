@@ -8,9 +8,12 @@ package nativeaudio
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 )
 
 // FFmpegPlay an audio file with ffplay.
@@ -40,6 +43,10 @@ func FFmpegPlay(path string) error {
 // s16le is the PCM format specifier, the final dash means "pipe to
 // stdout".
 func FFmpegLoad(path string) ([]byte, Format, error) {
+	f, err := probe(path)
+	if err != nil {
+		return nil, f, fmt.Errorf("probing file for metadata: %w", err)
+	}
 	buffer := bytes.NewBuffer(nil)
 	cmd := exec.Command(
 		"ffmpeg",
@@ -51,7 +58,7 @@ func FFmpegLoad(path string) ([]byte, Format, error) {
 	if err := cmd.Run(); err != nil {
 		return nil, Format{}, fmt.Errorf("ffmpeg: %w", err)
 	}
-	return buffer.Bytes(), Format{}, nil
+	return buffer.Bytes(), f, nil
 }
 
 // FFmpegDecode raw PCM with ffmpeg.
@@ -68,16 +75,83 @@ func FFmpegDecode(by []byte) ([]byte, Format, error) {
 		return nil, Format{}, fmt.Errorf("creating tmp file: %w", err)
 	}
 	defer os.Remove("tmp")
-	buffer := bytes.NewBuffer(nil)
-	cmd := exec.Command(
-		"ffmpeg",
-		"-i", "tmp",
-		"-f", "s16le",
-		"-",
+	return FFmpegLoad("tmp")
+}
+
+// probe queries the format information for a given audio file by parsing
+// ffprobe results.
+//
+//	ffprobe -i <path> -v quiet -print_format json -show_format -show_streams
+//
+func probe(path string) (Format, error) {
+	var (
+		stderr = bytes.NewBuffer(nil)
+		stdout = bytes.NewBuffer(nil)
 	)
-	cmd.Stdout = buffer
+	cmd := exec.Command(
+		"ffprobe",
+		"-i", path,
+		"-v", "quiet",
+		"-print_format", "json",
+		"-show_format",
+		"-show_streams",
+	)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
-		return nil, Format{}, fmt.Errorf("ffmpeg: %w", err)
+		return Format{}, fmt.Errorf("%q: %w %s", strings.Join(cmd.Args, " "), err, stderr.String())
 	}
-	return buffer.Bytes(), Format{}, nil
+	var f md
+	if err := json.Unmarshal(stdout.Bytes(), &f); err != nil {
+		return Format{}, fmt.Errorf("unmarshalling json: %w", err)
+	}
+	s := f.FirstAudioStream()
+	if s == nil {
+		return Format{}, fmt.Errorf("file has no audio streams")
+	}
+	return s.Format()
+}
+
+// md partially describes the structured metadata output from ffprobe.
+type md struct {
+	// Streams contains all streams, we will filter for "first audio stream".
+	Streams []stream `json:"streams"`
+}
+
+// stream description.
+type stream struct {
+	// CodecType is the "major" type: {audio,video}.
+	CodecType string `json:"codec_type"`
+	// SampleRate in Hz.
+	SampleRate string `json:"sample_rate"`
+	// Channel count.
+	Channels int `json:"channels"`
+}
+
+// FirstAudioStream returns the first audio stream described, if any.
+func (f md) FirstAudioStream() *stream {
+	for ii, s := range f.Streams {
+		if s.CodecType == "audio" {
+			return &f.Streams[ii]
+		}
+	}
+	return nil
+}
+
+// Format returns the unified Format struct from stream info.
+func (s stream) Format() (Format, error) {
+	if s.Channels < 1 || s.Channels > 2 {
+		return Format{}, fmt.Errorf("can only handle {1,2} channels got %d", s.Channels)
+	}
+	sr, err := strconv.Atoi(s.SampleRate)
+	if err != nil {
+		return Format{}, fmt.Errorf("invalid sample rate: must be number got %q", s.SampleRate)
+	}
+	return Format{
+		SampleRate: sr,
+		Channels:   s.Channels,
+		// We are going to tell ffmpeg to output s16le, though there
+		// might be a better place to make this assumption.
+		BitDepth: 2,
+	}, nil
 }
