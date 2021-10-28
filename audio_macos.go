@@ -8,7 +8,7 @@ func play(path string) error {
 }
 
 // load stub for macOS.
-func load(path string) ([]byte, error) {
+func load(path string) ([]byte, Format, error) {
 	return FFmpegLoad(path)
 }
 
