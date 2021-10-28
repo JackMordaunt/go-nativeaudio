@@ -16,3 +16,11 @@ func load(path string) ([]byte, Format, error) {
 func decode(by []byte) ([]byte, Format, error) {
 	return FFmpegDecode(by)
 }
+
+func start() error {
+	return nil
+}
+
+func end() error {
+	return nil
+}
