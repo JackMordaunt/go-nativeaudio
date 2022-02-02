@@ -7,7 +7,7 @@ package nativeaudio
 
 /*
 #cgo CFLAGS: -Werror -g -O3
-#cgo LDFLAGS: -lWinmm -lMf -lMfplat  -lMfuuid -loleaut32 -limm32 -lversion -lWindowsApp -lMfreadwrite -lShlwapi
+#cgo LDFLAGS: -lwinmm -lmf -lmfplat  -lmfuuid -loleaut32 -limm32 -lversion -lwindowsapp -lmfreadwrite -lshlwapi
 #include "audio_windows.h"
 */
 import "C"

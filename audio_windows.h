@@ -1,11 +1,11 @@
 #include <crtdbg.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <Windows.h>
+#include <windows.h>
 #include <winbase.h>
 #include <combaseapi.h>
 #include <mfapi.h>
-#include <Mfidl.h>
+#include <mfidl.h>
 #include <mferror.h>
 #include <initguid.h>
 #include <wmcodecdsp.h>
