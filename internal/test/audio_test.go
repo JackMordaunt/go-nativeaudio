@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"fmt"
+	"math/rand"
 	"testing"
 
 	"git.sr.ht/~jackmordaunt/nativeaudio"
@@ -71,6 +72,47 @@ func TestDecode(t *testing.T) {
 	}
 }
 
+// TestJunk ensures that decoding doesn't panic on junk input.
+func TestJunk(t *testing.T) {
+	fuzzy := make([]byte, 1024)
+	n, err := rand.Read(fuzzy)
+	if err != nil {
+		t.Fatalf("reading random bytes: %v", err)
+	}
+	if n != 1024 {
+		t.Fatalf("read wrong number bytes from rand reader: %v", n)
+	}
+	by, f, err := nativeaudio.Decode(fuzzy)
+	if err == nil {
+		t.Errorf("junk input did not cause error")
+	}
+	t.Logf("format = %v, decoded len = %d", f, len(by))
+}
+
+func TestFuzzy(t *testing.T) {
+	size := 1024
+	fuzzy := make([]byte, size)
+	for ii := 0; ii < 100; ii++ {
+		t.Logf("ii = %d", ii)
+		fmt.Printf("ii = %d\n", ii)
+		r := rand.New(rand.NewSource(int64(ii)))
+		n, err := r.Read(fuzzy)
+		if err != nil {
+			t.Fatalf("reading random bytes: %v", err)
+		}
+		if n != size {
+			t.Fatalf("read wrong number of bytes from rand reader: %v", n)
+		}
+		// fmt.Printf("%s\n", pcm(fuzzy))
+		by, f, err := nativeaudio.Decode(fuzzy)
+		if err == nil {
+			t.Errorf("junk input did not cause error")
+		}
+		t.Logf("format = %v, decoded len = %d", f, len(by))
+		t.Errorf("error")
+	}
+}
+
 // equal decodes the PCM samples and tests if they are "close enough"
 // using a heuristic tolerance.
 //
@@ -103,10 +145,7 @@ func equal(t *testing.T, left, right []byte) bool {
 	}
 	mean := float64(sum) / float64(size)
 	t.Logf("mean: %f, sum: %d, size: %d\n", mean, sum, size)
-	if mean > 0.1 {
-		return false
-	}
-	return true
+	return mean <= 0.2
 }
 
 func min(left, right int) int {
@@ -154,4 +193,12 @@ func BenchmarkDecode(b *testing.B) {
 			_ = f
 		}
 	})
+}
+
+type pcm []byte
+
+func (p pcm) String() string {
+	out := make([]int16, len(p)/4)
+	binary.Read(bytes.NewReader(p), binary.LittleEndian, out)
+	return fmt.Sprintf("%+v", out)
 }
