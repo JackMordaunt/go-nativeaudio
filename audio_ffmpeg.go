@@ -12,8 +12,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // FFmpegPlay an audio file with ffplay.
@@ -48,6 +50,7 @@ func FFmpegLoad(path string) ([]byte, Format, error) {
 		return nil, f, fmt.Errorf("probing file for metadata: %w", err)
 	}
 	buffer := bytes.NewBuffer(nil)
+	stderr := bytes.NewBuffer(nil)
 	cmd := exec.Command(
 		"ffmpeg",
 		"-i", path,
@@ -55,10 +58,31 @@ func FFmpegLoad(path string) ([]byte, Format, error) {
 		"-",
 	)
 	cmd.Stdout = buffer
+	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
-		return nil, Format{}, fmt.Errorf("ffmpeg: %w", err)
+		return nil, Format{}, fmt.Errorf("ffmpeg: %w: %s", err, stderr.String())
 	}
 	return buffer.Bytes(), f, nil
+}
+
+var count = counter{}
+
+type counter struct {
+	count int
+	m     sync.Mutex
+}
+
+func (c *counter) Next() int {
+	c.m.Lock()
+	defer c.m.Unlock()
+	c.count++
+	return c.count
+}
+
+func (c *counter) Done() {
+	c.m.Lock()
+	defer c.m.Unlock()
+	c.count--
 }
 
 // FFmpegDecode raw PCM with ffmpeg.
@@ -71,11 +95,14 @@ func FFmpegLoad(path string) ([]byte, Format, error) {
 // NOTE(jfm): unfortunately, some formats cannot be piped, so we will
 // create a temporary file instead.
 func FFmpegDecode(by []byte) ([]byte, Format, error) {
-	if err := os.WriteFile("tmp", by, 0644); err != nil {
+	// id ensures that multiple concurrent tmp files do not collide.
+	id := count.Next()
+	tmp := filepath.Join(os.TempDir(), fmt.Sprintf("nativeaudio-%d", id))
+	if err := os.WriteFile(tmp, by, 0644); err != nil {
 		return nil, Format{}, fmt.Errorf("creating tmp file: %w", err)
 	}
-	defer os.Remove("tmp")
-	return FFmpegLoad("tmp")
+	defer os.Remove(tmp)
+	return FFmpegLoad(tmp)
 }
 
 // probe queries the format information for a given audio file by parsing
