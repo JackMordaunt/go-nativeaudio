@@ -51,7 +51,7 @@ NewResult(void* value, Error* err)
         return (Result){value, err};
 }
 
-// CharWiden converst a raw C string to a wide string used by Windows.
+// CharWiden converts a raw C string to a wide string used by Windows.
 Result
 CharWiden(char* str)
 {
@@ -69,8 +69,6 @@ CharWiden(char* str)
 
         return NewResult(target, NULL);
 }
-
-#define BUFFER_DEFAULT_SIZE 1024*1024
 
 // BufferNew allocates a new buffer ready to use.
 Buffer* 
@@ -122,6 +120,9 @@ BufferWrite(Buffer* buffer, int size, BYTE* data)
 void
 BufferFree(Buffer* buffer) 
 {
+        if (buffer == NULL) {
+                return;
+        }
         free(buffer->Data);
         free(buffer);
 }
@@ -357,12 +358,11 @@ done:
 HRESULT
 ConfigureAudioStream(
     IMFSourceReader *pReader,   // Pointer to the source reader.
+    IMFMediaType **pUncompressedAudioType,
+    IMFMediaType **pPartialType,
     IMFMediaType **ppPCMAudio   // Receives the audio format.
 )
 {
-    IMFMediaType *pUncompressedAudioType = NULL;
-    IMFMediaType *pPartialType = NULL;
-
     // Select the first audio stream, and deselect all other streams.
     HRESULT hr = pReader->lpVtbl->SetStreamSelection(pReader,
         (DWORD)MF_SOURCE_READER_ALL_STREAMS, FALSE);
@@ -374,16 +374,16 @@ ConfigureAudioStream(
     }
 
     // Create a partial media type that specifies uncompressed PCM audio.
-    hr = MFCreateMediaType(&pPartialType);
+    hr = MFCreateMediaType(pPartialType);
 
     if (SUCCEEDED(hr))
     {
-        hr = pPartialType->lpVtbl->SetGUID(pPartialType, &MF_MT_MAJOR_TYPE, &MFMediaType_Audio);
+        hr = (*pPartialType)->lpVtbl->SetGUID((*pPartialType), &MF_MT_MAJOR_TYPE, &MFMediaType_Audio);
     }
 
     if (SUCCEEDED(hr))
     {
-        hr = pPartialType->lpVtbl->SetGUID(pPartialType, &MF_MT_SUBTYPE, &MFAudioFormat_PCM);
+        hr = (*pPartialType)->lpVtbl->SetGUID((*pPartialType), &MF_MT_SUBTYPE, &MFAudioFormat_PCM);
     }
 
     // Set this type on the source reader. The source reader will
@@ -392,7 +392,7 @@ ConfigureAudioStream(
     {
         hr = pReader->lpVtbl->SetCurrentMediaType(pReader,
             (DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM,
-            NULL, pPartialType);
+            NULL, (*pPartialType));
     }
 
     // Get the complete uncompressed format.
@@ -400,7 +400,7 @@ ConfigureAudioStream(
     {
         hr = pReader->lpVtbl->GetCurrentMediaType(pReader,
             (DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM,
-            &pUncompressedAudioType);
+            pUncompressedAudioType);
     }
 
     // Ensure the stream is selected.
@@ -414,7 +414,7 @@ ConfigureAudioStream(
     // Return the PCM format to the caller.
     if (SUCCEEDED(hr))
     {
-        *ppPCMAudio = pUncompressedAudioType;
+        *ppPCMAudio = (*pUncompressedAudioType);
         (*ppPCMAudio)->lpVtbl->AddRef(*ppPCMAudio);
     }
 
@@ -546,11 +546,12 @@ decode(IMFSourceReader * reader, Buffer ** out)
         assert(reader);
 
         IMFMediaBuffer *bufferReader = NULL; // buffer object containing the raw buffer.
-        LONGLONG prev_time_stamp = -1; 
         IMFSample *pSample = NULL;           // sample object containing on or more streams.
-        LONGLONG time_stamp = 0;
         Buffer *buffer = NULL;               // Buffer to accumulate decoded PCM and return to Go.
         BYTE *chunk = NULL;                  // pointer to start of chunk.
+        
+        LONGLONG prev_time_stamp = -1; 
+        LONGLONG time_stamp = 0;
         DWORD cbBuffer = 0;                  // size of chunk.
         HRESULT hr = S_OK;
         Error *err = NULL;
@@ -567,7 +568,13 @@ decode(IMFSourceReader * reader, Buffer ** out)
         // it all back to Go at once. 
         while (1) {
                 DWORD dwFlags = 0;
-
+                
+                if (pSample != NULL)
+                {
+                        pSample->lpVtbl->RemoveAllBuffers(pSample);
+                        pSample->lpVtbl->Release(pSample);
+                }
+                
                 // Read the next sample.
                 hr = reader->lpVtbl->ReadSample(
                         reader,
@@ -613,6 +620,10 @@ decode(IMFSourceReader * reader, Buffer ** out)
                         continue;
                 }
 
+                if (bufferReader != NULL) {
+                        bufferReader->lpVtbl->Release(bufferReader);
+                }
+
                 // Get a pointer to the buffer object.
                 hr = pSample->lpVtbl->ConvertToContiguousBuffer(pSample, &bufferReader);
 
@@ -642,7 +653,7 @@ decode(IMFSourceReader * reader, Buffer ** out)
                         goto done;
                 }
 
-                chunk = NULL;
+                chunk = NULL;                
         }
 
         *out = buffer;
@@ -651,6 +662,7 @@ done:
 
         if (pSample != NULL)
         {
+                pSample->lpVtbl->RemoveAllBuffers(pSample);
                 pSample->lpVtbl->Release(pSample);
         }
 
@@ -708,7 +720,10 @@ Decode(BYTE* compressed, UINT size)
 
         IMFMediaType * m_type = NULL;
 
-        hr = ConfigureAudioStream(reader, &m_type);
+        IMFMediaType * pUncompressedAudioType = NULL;
+        IMFMediaType * pPartialType = NULL;
+
+        hr = ConfigureAudioStream(reader, &pUncompressedAudioType, &pPartialType, &m_type);
 
         if (FAILED(hr))
         {
@@ -736,6 +751,13 @@ Decode(BYTE* compressed, UINT size)
         assert(buffer);
 
 done:
+        if (pUncompressedAudioType != NULL) {
+                pUncompressedAudioType->lpVtbl->Release(pUncompressedAudioType);
+        }
+        
+        if (pPartialType != NULL) {
+                pPartialType->lpVtbl->Release(pPartialType);
+        }
 
         if (m_type != NULL)
         {
@@ -745,6 +767,10 @@ done:
         if (stream != NULL)
         {
                 stream->lpVtbl->Release(stream);
+        }
+
+        if (mem_stream != NULL) {
+                mem_stream->lpVtbl->Release(mem_stream);
         }
 
         if (reader != NULL)
@@ -801,7 +827,10 @@ Load(char* path)
 
         IMFMediaType * m_type = NULL;
 
-        hr = ConfigureAudioStream(reader, &m_type);
+        IMFMediaType * pUncompressedAudioType = NULL;
+        IMFMediaType * pPartialType = NULL;
+
+        hr = ConfigureAudioStream(reader, &pUncompressedAudioType, &pPartialType, &m_type);
 
         if (FAILED(hr))
         {
@@ -837,6 +866,14 @@ Load(char* path)
 
 done:
 
+        if (pUncompressedAudioType != NULL) {
+                pUncompressedAudioType->lpVtbl->Release(pUncompressedAudioType);
+        }
+        
+        if (pPartialType != NULL) {
+                pPartialType->lpVtbl->Release(pPartialType);
+        }
+        
         if (m_type != NULL)
         {
                 m_type->lpVtbl->Release(m_type);

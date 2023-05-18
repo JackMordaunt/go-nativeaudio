@@ -40,7 +40,6 @@ typedef struct Result
         Error* Err;
 } Result;
 
-
 // Format describes uncompressed PCM necessary for correct playback. 
 typedef struct Format
 {
@@ -48,7 +47,6 @@ typedef struct Format
         uint32_t Channels;
         uint32_t BitDepth; 
 } Format;
-
 
 // Buffer describes a dynamic byte buffer with a length, capacity and 
 // a pointer to the first element. 
@@ -58,8 +56,6 @@ typedef struct Buffer
         int Cap;    // Capacity is the total allocated memory. 
         BYTE* Data; // Data is the pointer to the first byte. 
 } Buffer; 
-
-
 
 // FormatResult captures the result of decoding an audio buffer. 
 typedef struct FormatResult
@@ -77,9 +73,20 @@ typedef struct DecodeResult
         Error* Err;
 } DecodeResult;
 
+#define BUFFER_DEFAULT_SIZE 1024*1024
+
+// BufferNew allocates a buffer object that can read and write data. 
+Buffer*
+BufferNew();
+
+// BufferWrites the data to the buffer. 
+void 
+BufferWrite(Buffer* buf, int size, BYTE* data);
+
 // BufferFree deallocates the memory for a buffer, including the pointer
 // to it and it's pointer to the raw data. 
-void BufferFree(Buffer*);
+void
+BufferFree(Buffer*);
 
 // ErrorFree deallocates the memory for an error and all wrapped errors. 
 void ErrorFree(Error*);
