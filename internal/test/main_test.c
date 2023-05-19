@@ -55,11 +55,6 @@ TestBuffer(int *count_fail, int *count_pass) {
     BufferFree(b);
 }
 
-void
-TestCharWiden(int *count_fail, int *count_pass) {
-  
-}
-
 int
 main(int argc, char** argv) {
 
@@ -67,7 +62,6 @@ main(int argc, char** argv) {
   int count_pass = 0;
 
   TestBuffer(&count_fail, &count_pass);
-  TestCharWiden(&count_fail, &count_pass);
   
   printf("%d fail, %d pass\n", count_fail, count_pass);
   return count_fail != 0;
