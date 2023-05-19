@@ -541,13 +541,12 @@ done:
 
 // decode buffers the decoded PCM s16le data and returns it via out.
 Error*
-decode(IMFSourceReader * reader, Buffer ** out)
+decode(IMFSourceReader * reader, Buffer * out)
 {
         assert(reader);
-
+        
         IMFMediaBuffer *bufferReader = NULL; // buffer object containing the raw buffer.
         IMFSample *pSample = NULL;           // sample object containing on or more streams.
-        Buffer *buffer = NULL;               // Buffer to accumulate decoded PCM and return to Go.
         BYTE *chunk = NULL;                  // pointer to start of chunk.
         
         LONGLONG prev_time_stamp = -1; 
@@ -555,10 +554,6 @@ decode(IMFSourceReader * reader, Buffer ** out)
         DWORD cbBuffer = 0;                  // size of chunk.
         HRESULT hr = S_OK;
         Error *err = NULL;
-
-        // Heap allocated buffer to accumulate the audio data. 
-        // NOTE(jfm): Free from cgo side with BufferFree().
-        buffer = BufferNew(); 
 
         // Stream all the data into a byte buffer.
 
@@ -642,7 +637,7 @@ decode(IMFSourceReader * reader, Buffer ** out)
                         goto done;
                 }
         
-                BufferWrite(buffer, cbBuffer, chunk);
+                BufferWrite(out, cbBuffer, chunk);
 
                 // Unlock the reader that we just copied from.
                 hr = bufferReader->lpVtbl->Unlock(bufferReader);
@@ -655,8 +650,6 @@ decode(IMFSourceReader * reader, Buffer ** out)
 
                 chunk = NULL;                
         }
-
-        *out = buffer;
 
 done:
 
@@ -739,9 +732,9 @@ Decode(BYTE* compressed, UINT size)
                 goto done;
         }
 
-        Buffer * buffer = NULL;
+        Buffer * buffer = BufferNew();
 
-        r.Err = decode(reader, &buffer);
+        r.Err = decode(reader, buffer);
 
         if (r.Err != NULL) 
         {
@@ -856,7 +849,7 @@ Load(char* path)
         // NOTE(jfm): Free from cgo side with BufferFree().
         buffer = BufferNew(); 
 
-        err = decode(reader, &buffer);
+        err = decode(reader, buffer);
         
         if (err != NULL) 
         {
