@@ -15,6 +15,8 @@ var (
 	compressed []byte
 	//go:embed uncompressed.s16le.pcm
 	uncompressed []byte
+	//go:embed corrupt.m4a
+	corrupt []byte
 )
 
 // TestLoad ensures that output from the native decoders are close to
@@ -69,6 +71,16 @@ func TestDecode(t *testing.T) {
 	if !equal(t, by, uncompressed) {
 		t.Fatalf("native output does not match ffmpeg output")
 	}
+}
+
+// TestDecodeCorrupt ensures that we get an error value on invalid input and
+// that we don't crash the process.
+func TestDecodeCorrupt(t *testing.T) {
+	_, f, err := nativeaudio.Decode(corrupt)
+	if err == nil {
+		t.Fatalf("expected error for corrupt audio data, got nil")
+	}
+	t.Logf("format: %+v", f)
 }
 
 // equal decodes the PCM samples and tests if they are "close enough"
