@@ -109,12 +109,8 @@ func FFmpegDecode(by []byte) ([]byte, Format, error) {
 // ffprobe results.
 //
 //	ffprobe -i <path> -v quiet -print_format json -show_format -show_streams
-//
 func probe(path string) (Format, error) {
-	var (
-		stderr = bytes.NewBuffer(nil)
-		stdout = bytes.NewBuffer(nil)
-	)
+	stdout := bytes.NewBuffer(nil)
 	cmd := exec.Command(
 		"ffprobe",
 		"-i", path,
@@ -124,9 +120,9 @@ func probe(path string) (Format, error) {
 		"-show_streams",
 	)
 	cmd.Stdout = stdout
-	cmd.Stderr = stderr
+	cmd.Stderr = stdout
 	if err := cmd.Run(); err != nil {
-		return Format{}, fmt.Errorf("%q: %w %s", strings.Join(cmd.Args, " "), err, stderr.String())
+		return Format{}, fmt.Errorf("%q: %w %s", strings.Join(cmd.Args, " "), err, stdout.String())
 	}
 	var f md
 	if err := json.Unmarshal(stdout.Bytes(), &f); err != nil {
