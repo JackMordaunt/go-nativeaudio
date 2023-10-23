@@ -76,18 +76,24 @@ func load(path string) (uncompressed []byte, format Format, err error) {
 //
 // uncompressed is a read-only slice backed by a C buffer. Do not mutate.
 func decode(compressed []byte) (uncompressed []byte, format Format, err error) {
-	r := C.Decode((*C.uchar)(C.CBytes(compressed)), C.uint(len(compressed)))
+	data := C.CBytes(compressed)
+	defer C.free(data)
+
+	r := C.Decode((*C.uchar)(data), C.uint(len(compressed)))
 	if r.Err != nil && r.Err.Str != nil {
 		defer C.ErrorFree(r.Err)
 		return nil, format, collectErrors(r.Err)
 	}
+
 	defer C.BufferFree(r.Uncompressed)
+
 	uncompressed = C.GoBytes(unsafe.Pointer(r.Uncompressed.Data), C.int(r.Uncompressed.Len))
 	format = Format{
 		Channels:   int(r.Format.Channels),
 		BitDepth:   int(r.Format.BitDepth),
 		SampleRate: int(r.Format.SampleRate),
 	}
+
 	return uncompressed, format, nil
 }
 
