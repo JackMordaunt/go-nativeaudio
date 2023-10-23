@@ -693,6 +693,11 @@ Decode(BYTE* compressed, UINT size)
         // buffer. 
         IStream * mem_stream = SHCreateMemStream(compressed, size);
 
+        IMFMediaType * m_type = NULL;
+        IMFMediaType * pUncompressedAudioType = NULL;
+        IMFMediaType * pPartialType = NULL;
+        Buffer * buffer = BufferNew();
+
         hr = MFCreateMFByteStreamOnStream(mem_stream, &stream);
 
         if (FAILED(hr)) 
@@ -711,10 +716,6 @@ Decode(BYTE* compressed, UINT size)
                 goto done;
         }
 
-        IMFMediaType * m_type = NULL;
-
-        IMFMediaType * pUncompressedAudioType = NULL;
-        IMFMediaType * pPartialType = NULL;
 
         hr = ConfigureAudioStream(reader, &pUncompressedAudioType, &pPartialType, &m_type);
 
@@ -731,8 +732,6 @@ Decode(BYTE* compressed, UINT size)
                 r.Err = ErrorWrap(fr.Err, "getting format");
                 goto done;
         }
-
-        Buffer * buffer = BufferNew();
 
         r.Err = decode(reader, buffer);
 
@@ -807,6 +806,10 @@ Load(char* path)
                         .Channels = 0,
                 }
         };
+        
+        IMFMediaType * m_type = NULL;
+        IMFMediaType * pUncompressedAudioType = NULL;
+        IMFMediaType * pPartialType = NULL;
 
         Result r = NewSourceReaderForFile(path);
         
@@ -818,10 +821,6 @@ Load(char* path)
 
         reader = (IMFSourceReader*)(r.Value);
 
-        IMFMediaType * m_type = NULL;
-
-        IMFMediaType * pUncompressedAudioType = NULL;
-        IMFMediaType * pPartialType = NULL;
 
         hr = ConfigureAudioStream(reader, &pUncompressedAudioType, &pPartialType, &m_type);
 
