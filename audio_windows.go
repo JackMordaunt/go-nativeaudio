@@ -784,26 +784,68 @@ func (v *IMFMediaBuffer) Unlock() error {
 */
 
 var (
-	_mfplat      = windows.NewLazySystemDLL("Mfplat.dll")
-	_shlwapi     = windows.NewLazySystemDLL("Shlwapi.dll")
-	_mfreadwrite = windows.NewLazySystemDLL("Mfreadwrite.dll")
+	_mfplat      *windows.DLL
+	_shlwapi     *windows.DLL
+	_mfreadwrite *windows.DLL
 
-	_SHCreateMemStream = _shlwapi.NewProc("SHCreateMemStream")
+	_SHCreateMemStream *windows.Proc
 
-	_MFStartup                    = _mfplat.NewProc("MFStartup")
-	_MFShutdown                   = _mfplat.NewProc("MFShutdown")
-	_MFCreateMediaType            = _mfplat.NewProc("MFCreateMediaType")
-	_MFCreateAttributes           = _mfplat.NewProc("MFCreateAttributes")
-	_MFCreateMFByteStreamOnStream = _mfplat.NewProc("MFCreateMFByteStreamOnStream")
+	_MFStartup                    *windows.Proc
+	_MFShutdown                   *windows.Proc
+	_MFCreateMediaType            *windows.Proc
+	_MFCreateAttributes           *windows.Proc
+	_MFCreateMFByteStreamOnStream *windows.Proc
 
-	_MFCreateSourceReaderFromByteStream = _mfreadwrite.NewProc("MFCreateSourceReaderFromByteStream")
+	_MFCreateSourceReaderFromByteStream *windows.Proc
 )
 
-func MFStartup(version, flags uintptr) error {
+func MFStartup(version, flags uintptr) (err error) {
+	_mfplat, err = windows.LoadDLL("Mfplat.dll")
+	if err != nil {
+		return fmt.Errorf("Mfplat.dll: %w", err)
+	}
+	_shlwapi, err = windows.LoadDLL("Shlwapi.dll")
+	if err != nil {
+		return fmt.Errorf("Shlwapi.dll: %w", err)
+	}
+	_mfreadwrite, err = windows.LoadDLL("Mfreadwrite.dll")
+	if err != nil {
+		return fmt.Errorf("Mfreadwrite.dll: %w", err)
+	}
+	_SHCreateMemStream, err = _shlwapi.FindProc("SHCreateMemStream")
+	if err != nil {
+		return fmt.Errorf("SHCreateMemStream: %w", err)
+	}
+	_MFStartup, err = _mfplat.FindProc("MFStartup")
+	if err != nil {
+		return fmt.Errorf("MFStartup: %w", err)
+	}
+	_MFShutdown, err = _mfplat.FindProc("MFShutdown")
+	if err != nil {
+		return fmt.Errorf("MFShutdown: %w", err)
+	}
+	_MFCreateMediaType, err = _mfplat.FindProc("MFCreateMediaType")
+	if err != nil {
+		return fmt.Errorf("MFCreateMediaType: %w", err)
+	}
+	_MFCreateAttributes, err = _mfplat.FindProc("MFCreateAttributes")
+	if err != nil {
+		return fmt.Errorf("MFCreateAttributes: %w", err)
+	}
+	_MFCreateMFByteStreamOnStream, err = _mfplat.FindProc("MFCreateMFByteStreamOnStream")
+	if err != nil {
+		return fmt.Errorf("MFCreateMFByteStreamOnStream: %w", err)
+	}
+	_MFCreateSourceReaderFromByteStream, err = _mfreadwrite.FindProc("MFCreateSourceReaderFromByteStream")
+	if err != nil {
+		return fmt.Errorf("MFCreateSourceReaderFromByteStream: %w", err)
+	}
+
 	r, _, _ := _MFStartup.Call(version, flags)
 	if r != S_OK {
 		return MFErr{Code: r}
 	}
+
 	return nil
 }
 
@@ -888,7 +930,7 @@ func (e MFErr) Error() string {
 	out := make([]uint16, 300)
 	size, err := windows.FormatMessage(
 		windows.FORMAT_MESSAGE_FROM_SYSTEM|windows.FORMAT_MESSAGE_FROM_HMODULE|windows.FORMAT_MESSAGE_ARGUMENT_ARRAY,
-		_mfplat.Handle(),
+		uintptr(_mfplat.Handle),
 		uint32(e.Code),
 		0,
 		out,
