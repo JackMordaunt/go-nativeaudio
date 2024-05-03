@@ -535,14 +535,26 @@ func AudioFileReadProcImpl(
 	buffer unsafe.Pointer,
 	actualCount *C.UInt32,
 ) C.OSStatus {
+	pos := int(inPosition)
+	req := int(requestCount)
+	end := pos + req
+
 	inBuf := *(*[]byte)(inClientData)
 
 	// Assuming the the out buffer is sized to contain the requested number of bytes.
 	// This is not memory we control.
-	outBuf := unsafe.Slice((*byte)(buffer), requestCount)
+	outBuf := unsafe.Slice((*byte)(buffer), req)
 
-	dst := outBuf[:int(requestCount)]
-	src := inBuf[int(inPosition) : int(inPosition)+int(requestCount)]
+	dst := outBuf[:req]
+
+	// It seems like the requested amount is allowed to exceed the
+	// actual size of the audio data. In that case we need to bound
+	// it by the length of the audio data.
+	if end > len(inBuf) {
+		end = len(inBuf)
+	}
+
+	src := inBuf[pos:end]
 
 	n := copy(dst, src)
 
