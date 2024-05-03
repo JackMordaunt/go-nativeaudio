@@ -397,7 +397,7 @@ func (af *AudioFile) NextPacket() C.SInt64 {
 }
 
 func (af *AudioFile) ReadPackets(
-	ioNumBytes C.UInt32,
+	ioNumBytes *C.UInt32,
 	outPacketDescriptions *C.AudioStreamPacketDescription,
 	ioNumPackets *C.UInt32,
 	outBuffer unsafe.Pointer,
@@ -405,7 +405,7 @@ func (af *AudioFile) ReadPackets(
 	if err := C.AudioFileReadPacketData(
 		af.id,
 		_false,
-		&ioNumBytes,
+		ioNumBytes,
 		outPacketDescriptions,
 		af.nextPacket,
 		ioNumPackets,
@@ -513,7 +513,7 @@ func InputDataProc(
 	}
 
 	if err := ic.mInputFile.ReadPackets(
-		ioData.mBuffers[0].mDataByteSize,
+		&ioData.mBuffers[0].mDataByteSize,
 		*outDataPacketDescription,
 		ioNumberDataPackets,
 		ioData.mBuffers[0].mData,
