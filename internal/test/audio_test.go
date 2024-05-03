@@ -18,9 +18,22 @@ var (
 	compressed []byte
 	//go:embed uncompressed.s16le.pcm
 	uncompressed []byte
+	//go:embed uncompressed.s16le.macos.pcm
+	uncompressed_macos []byte
 	//go:embed corrupt.m4a
 	corrupt []byte
 )
+
+// getUncompressed returns the uncompressed result produced on the
+// current platform.
+func getUncompressed() []byte {
+	switch runtime.GOOS {
+	case "darwin":
+		return uncompressed_macos
+	default:
+		return uncompressed
+	}
+}
 
 // TestLoad ensures that output from the native decoders are close to
 // the output of ffmpeg.
@@ -41,10 +54,10 @@ func TestLoad(t *testing.T) {
 		t.Fatalf("unexpected channel count: want 2, got %d", f.Channels)
 	}
 	// Test passes on exact match, otherwise do a tolerance test.
-	if bytes.Equal(by, uncompressed) {
+	if bytes.Equal(by, getUncompressed()) {
 		return
 	}
-	if !equal(t, by, uncompressed) {
+	if !equal(t, by, getUncompressed()) {
 		t.Fatalf("native output does not match ffmpeg output")
 	}
 }
@@ -68,10 +81,10 @@ func TestDecode(t *testing.T) {
 		t.Fatalf("unexpected channel count: want 2, got %d", f.Channels)
 	}
 	// Test passes on exact match, otherwise do a tolerance test.
-	if bytes.Equal(by, uncompressed) {
+	if bytes.Equal(by, getUncompressed()) {
 		return
 	}
-	if !equal(t, by, uncompressed) {
+	if !equal(t, by, getUncompressed()) {
 		t.Fatalf("native output does not match ffmpeg output")
 	}
 }
@@ -124,7 +137,6 @@ func TestMemoryLeak(t *testing.T) {
 
 		t.Errorf("un-freed data: %s -> %d\n", f.Name(), p.InUseBytes())
 	}
-
 }
 
 // equal decodes the PCM samples and tests if they are "close enough"
