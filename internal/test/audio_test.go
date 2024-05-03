@@ -5,6 +5,9 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"fmt"
+	"runtime"
+	"slices"
+	"strings"
 	"testing"
 
 	"git.sr.ht/~jackmordaunt/nativeaudio"
@@ -81,6 +84,47 @@ func TestDecodeCorrupt(t *testing.T) {
 		t.Fatalf("expected error for corrupt audio data, got nil")
 	}
 	t.Logf("format: %+v", f)
+}
+
+// TestMemoryLeak runs the decode several times, forces a GC and verifies
+// that no data is left over from this package.
+func TestMemoryLeak(t *testing.T) {
+	runtime.MemProfileRate = 1
+
+	for ii := 0; ii < 10; ii++ {
+		by, f, err := nativeaudio.Load("compressed.m4a")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		_ = by
+		_ = f
+		_ = err
+	}
+
+	runtime.GC()
+	runtime.GC()
+
+	var profiles []runtime.MemProfileRecord
+
+	for {
+		n, ok := runtime.MemProfile(profiles, false)
+		if ok {
+			profiles = profiles[:n]
+			break
+		}
+		profiles = slices.Grow(profiles, n)[:n]
+	}
+
+	for _, p := range profiles {
+		f := runtime.FuncForPC(p.Stack0[0])
+
+		if !strings.Contains(f.Name(), "nativeaudio") {
+			continue
+		}
+
+		t.Errorf("un-freed data: %s -> %d\n", f.Name(), p.InUseBytes())
+	}
+
 }
 
 // equal decodes the PCM samples and tests if they are "close enough"
