@@ -10,13 +10,14 @@ This package was inspired by the utter lack of audio decoders for AAC,
 which it turns out is a closed codec that Windows and macOS have bought
 licenses for. 
 
-For the moment Windows is implemented via the Media Foundation, and 
-other platforms shell out to FFmpeg as a fallback. Unfortunately we can't link 
-to FFmpeg without accepting the GPL, so we must take the performance hit of 
-using a sub-process. 
+Windows is implemented via the Media Foundation and macOS is implemented
+on AudioToolbox/AVFoundation.
 
-macOS bindings are expected to land relatively soon, however the other
-platforms are left as an exercise to the community. 
+Other platforms including Linux shell out to FFmpeg.
+
+Unfortunately we can't link to FFmpeg without accepting the GPL, so we must
+take the performance hit of using a sub-process. 
+
 
 `go get git.sr.ht/~jackmordaunt/nativeaudio`
 
@@ -32,5 +33,5 @@ func main() {
 
 ## TODO 
 
-- [ ] macOS native bindings 
 - [ ] streaming API (current API is a buffered for simplicity)
+- [ ] Linux: something better then shelling out to FFmpeg
