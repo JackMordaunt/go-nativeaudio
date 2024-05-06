@@ -55,7 +55,6 @@ func end() error {
 	return nil
 }
 
-// play stub for macOS.
 func play(path string) error {
 	data, format, err := load(path)
 	if err != nil {
@@ -78,7 +77,6 @@ func play(path string) error {
 	return player.Close()
 }
 
-// load stub for macOS.
 func load(path string) (_ []byte, f Format, _ error) {
 	inputf, err := os.Open(path)
 	if err != nil {
@@ -95,7 +93,6 @@ func load(path string) (_ []byte, f Format, _ error) {
 	return decode(inputBuf)
 }
 
-// decode stub for macOS.
 func decode(buf []byte) (_ []byte, f Format, _ error) {
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
@@ -218,8 +215,10 @@ func decode(buf []byte) (_ []byte, f Format, _ error) {
 	pinner.Pin(ic)
 
 	// This constant is derived from the example. I don't know what a "good" value is.
+	// Adjusting this will tradeoff latency against throughput.
 	packetsPerLoop := C.UInt32(10000)
 
+	// packet buffer holds valid packet data. Re-used between iterations.
 	packetBuffer := make([]byte, 0, packetsPerLoop*maxOutputPacketSize)
 	pinner.Pin(unsafe.Pointer(unsafe.SliceData(packetBuffer)))
 
@@ -231,12 +230,14 @@ func decode(buf []byte) (_ []byte, f Format, _ error) {
 		numPackets := packetsPerLoop
 
 		// Initialize AudioBufferList with a single buffer because we are
-		// working with interleaved PCM samples.
+		// working with interleaved PCM samples. mDataByteSize is an in-out
+		// variable, and will contain the number of bytes copied to the
+		// buffer after the call to FillComplexBuffer.
 		abl := C.AudioBufferList{
 			mNumberBuffers: 1,
 			mBuffers: [1]C.AudioBuffer{{
 				mNumberChannels: outputDescription.mChannelsPerFrame,
-				mDataByteSize:   C.UInt32(cap(packetBuffer)),
+				mDataByteSize:   C.UInt32(cap(packetBuffer)), // in: capacity, out: length
 				mData:           unsafe.Pointer(unsafe.SliceData(packetBuffer)),
 			}},
 		}
@@ -252,7 +253,7 @@ func decode(buf []byte) (_ []byte, f Format, _ error) {
 		}
 
 		if numPackets > 0 {
-			out = append(out, unsafe.Slice((*byte)(abl.mBuffers[0].mData), abl.mBuffers[0].mDataByteSize)...)
+			out = append(out, packetBuffer[:abl.mBuffers[0].mDataByteSize]...)
 		}
 
 		if numPackets < packetsPerLoop {
