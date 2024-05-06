@@ -214,8 +214,8 @@ func decode(buf []byte) (_ []byte, f Format, _ error) {
 	pinner.Pin(unsafe.SliceData(ic.mPacketDescriptions))
 	pinner.Pin(ic)
 
-	// This constant is derived from the example. I don't know what a "good" value is.
 	// Adjusting this will tradeoff latency against throughput.
+	// Given that we aren't streaming, throughput is preferable.
 	packetsPerLoop := C.UInt32(10000)
 
 	// packet buffer holds valid packet data. Re-used between iterations.
