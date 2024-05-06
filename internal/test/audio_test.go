@@ -174,14 +174,8 @@ func equal(t *testing.T, left, right []byte) bool {
 	if mean > 0.1 {
 		return false
 	}
-	return true
-}
 
-func min(left, right int) int {
-	if left < right {
-		return left
-	}
-	return right
+	return true
 }
 
 func abs(n int) int {
