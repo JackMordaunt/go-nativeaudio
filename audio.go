@@ -3,10 +3,9 @@
 //
 // Where there are native APIs to call we default to invoking ffmpeg.
 //
-// 	Windows: Media Foundation
-// 	  macOS: ffmepg (pending native bindings)
-// 	  Linux: ffmpeg
-//
+//	Windows: Media Foundation
+//	  macOS: AudioToolbox
+//	  Linux: ffmpeg
 package nativeaudio
 
 import (
