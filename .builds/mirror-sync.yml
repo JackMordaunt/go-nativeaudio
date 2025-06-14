@@ -1,0 +1,12 @@
+image: alpine/edge
+packages:
+  - git
+secrets:
+  - 1c238745-e2fe-4372-8682-c8b6929ffbcd
+tasks:
+  - sync: |
+      ssh-keyscan github.com >> ~/.ssh/known_hosts
+      git clone --mirror https://git.sr.ht/~jackmordaunt/nativeaudio
+      cd nativeaudio
+      git remote set-url --push origin git@github.com:jackmordaunt/go-nativeaudio.git
+      git push --mirror
