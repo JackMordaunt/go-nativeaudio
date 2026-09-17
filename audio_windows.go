@@ -845,7 +845,7 @@ func MFStartup(version, flags uintptr) (err error) {
 }
 
 func MFShutdown() error {
-	r, _, _ := _MFStartup.Call()
+	r, _, _ := _MFShutdown.Call()
 	if r != S_OK {
 		return MFErr{Code: r}
 	}
