@@ -71,19 +71,17 @@ func decode(compressed []byte) (uncompressed []byte, format Format, err error) {
 
 	// We need to adapt the generic IStream to a Media Foundation stream type.
 	var mfByteStream *IMFByteStream
-	defer mfByteStream.Release()
-
 	if err := MFCreateMFByteStreamOnStream(stream, &mfByteStream); err != nil {
 		return nil, format, fmt.Errorf("creating MFByteStream from IStream: %w", err)
 	}
+	defer mfByteStream.Release()
 
 	// Attributes to configure the source reader with; specifically, enable hardware codecs.
 	var attributes *IMFAttributes
-	defer attributes.Release()
-
 	if err := MFCreateAttributes(&attributes, 1); err != nil {
 		return nil, format, fmt.Errorf("creating attributes to apply to source reader: %w", err)
 	}
+	defer attributes.Release()
 
 	if err := attributes.SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1); err != nil {
 		return nil, format, fmt.Errorf("enabling hardware transforms: %w", err)
@@ -91,11 +89,10 @@ func decode(compressed []byte) (uncompressed []byte, format Format, err error) {
 
 	// Create the source reader using the byte stream.
 	var mfSourceReader *IMFSourceReader
-	defer mfSourceReader.Release()
-
 	if err := MFCreateSourceReaderFromByteStream(mfByteStream, attributes, &mfSourceReader); err != nil {
 		return nil, format, fmt.Errorf("creating IMFSourceReader from IMFByteStream: %w", err)
 	}
+	defer mfSourceReader.Release()
 
 	if err := configureAudioStream(mfSourceReader); err != nil {
 		return nil, format, fmt.Errorf("configuring audio stream: %w", err)
@@ -119,12 +116,11 @@ func decode(compressed []byte) (uncompressed []byte, format Format, err error) {
 // configureAudioStream selects the first audio stream and configures it output PCM.
 func configureAudioStream(pReader *IMFSourceReader) error {
 	var pPartialType *IMFMediaType
-	defer pPartialType.Release()
-
-	// Create a partial media pUncompressedAutioTypee that specifies uncompressed PCM audio.
+	// Create a partial media type that specifies uncompressed PCM audio.
 	if err := MFCreateMediaType(&pPartialType); err != nil {
 		return fmt.Errorf("creating media type: %w", err)
 	}
+	defer pPartialType.Release()
 
 	if err := pPartialType.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio); err != nil {
 		return fmt.Errorf("setting major type: %w", err)
@@ -153,12 +149,11 @@ func configureAudioStream(pReader *IMFSourceReader) error {
 // getSourceReaderFormat returns the audio format configured for the source reader.
 func getSourceReaderFormat(sr *IMFSourceReader) (f Format, _ error) {
 	var mfMediaType *IMFMediaType
-	defer mfMediaType.Release()
-
 	// Get the complete uncompressed format.
 	if err := sr.GetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, &mfMediaType); err != nil {
 		return f, fmt.Errorf("getting the current media type: %w", err)
 	}
+	defer mfMediaType.Release()
 
 	return getFormat(mfMediaType)
 }
