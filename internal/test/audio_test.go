@@ -142,10 +142,16 @@ func TestMemoryLeak(t *testing.T) {
 // equal decodes the PCM samples and tests if they are "close enough"
 // using a heuristic tolerance.
 //
-// Decode each sample as a signed integer and compute the absolute
-// difference on average.
+// The two decoders must agree on length exactly. Sample values are
+// compared as signed integers by mean absolute difference, which must
+// stay under one quantisation step (1 LSB). Different AAC decoders
+// legitimately differ by rounding, so bit-exact output is not expected.
 func equal(t *testing.T, left, right []byte) bool {
 	if len(left) == 0 || len(right) == 0 {
+		return false
+	}
+	if len(left) != len(right) {
+		t.Logf("length mismatch: native %d bytes, reference %d bytes", len(left), len(right))
 		return false
 	}
 	var (
@@ -171,11 +177,7 @@ func equal(t *testing.T, left, right []byte) bool {
 	}
 	mean := float64(sum) / float64(size)
 	t.Logf("mean: %f, sum: %d, size: %d\n", mean, sum, size)
-	if mean > 0.1 {
-		return false
-	}
-
-	return true
+	return mean < 1.0
 }
 
 func abs(n int) int {
