@@ -194,8 +194,8 @@ type SourceReader struct {
 	chunk   *byte           // start of chunk of audio data
 	chunkSz uint32          // size of chunk
 
-	prevTimestamp    int64
-	currentTimestamp int64
+	prevTimestamp int64 // timestamp of the last emitted sample.
+	hasPrev       bool  // whether any sample has been emitted yet.
 
 	data []byte // Go view of the audio data, backed by native memory.
 }
@@ -216,49 +216,83 @@ func (s *SourceReader) Read(p []byte) (int, error) {
 		return s.copyInto(p), nil
 	}
 
-	if !s.next() {
+	ok, err := s.next()
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
 		return 0, io.EOF
 	}
 
 	return s.copyInto(p), nil
 }
 
-// next reads the next audio sample, returning true if found, or false if EOF.
-func (s *SourceReader) next() bool {
+// next reads the next audio sample into s, returning false at end of
+// stream. Any error from the source reader ends the stream.
+func (s *SourceReader) next() (bool, error) {
 	for {
-		var flags uint32
+		var (
+			flags     uint32
+			timestamp int64
+			sample    *IMFSample
+		)
 
-		// Read the next sample; skipping samples with matching time stamps.
-		// For some reason ReadSample can produce more than one sample at time 0.
-		// Emitting all of them produces largers files and audio artifacts.
-		s.source.ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, nil, &flags, &s.currentTimestamp, &s.sample)
+		err := s.source.ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, nil, &flags, &timestamp, &sample)
 
+		// A sample can accompany a flag we treat as terminal, so release
+		// it before deciding whether to stop.
+		if err != nil || flags&(MF_SOURCE_READERF_ERROR|MF_SOURCE_READERF_ENDOFSTREAM|MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) != 0 {
+			sample.Release()
+		}
+		if err != nil {
+			return false, fmt.Errorf("reading sample: %w", err)
+		}
+		if flags&MF_SOURCE_READERF_ERROR != 0 {
+			return false, fmt.Errorf("reading sample: source reader reported an error")
+		}
 		if flags&MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED != 0 {
-			return false
+			return false, fmt.Errorf("reading sample: media type changed mid-stream")
 		}
-
 		if flags&MF_SOURCE_READERF_ENDOFSTREAM != 0 {
-			return false
+			return false, nil
 		}
 
-		if s.sample == nil {
+		// The reader can legitimately return no sample and no terminal
+		// flag (for example, while a decoder is buffering). Ask again.
+		if sample == nil {
 			continue
 		}
 
-		if s.currentTimestamp != s.prevTimestamp-1 {
-			break
+		// Skip samples that repeat the previous timestamp. ReadSample can
+		// produce more than one sample at time 0; emitting all of them
+		// produces larger output and audible artifacts.
+		if s.hasPrev && timestamp == s.prevTimestamp {
+			sample.Release()
+			continue
 		}
+
+		s.sample = sample
+		s.prevTimestamp = timestamp
+		s.hasPrev = true
+		break
 	}
 
-	s.prevTimestamp = s.currentTimestamp + 1
-
-	s.sample.ConvertToContiguousBuffer(&s.buffer)
-	s.buffer.Lock(&s.chunk, nil, &s.chunkSz)
+	if err := s.sample.ConvertToContiguousBuffer(&s.buffer); err != nil {
+		s.sample.Release()
+		s.sample = nil
+		return false, fmt.Errorf("converting sample to contiguous buffer: %w", err)
+	}
+	if err := s.buffer.Lock(&s.chunk, nil, &s.chunkSz); err != nil {
+		s.buffer.Release()
+		s.sample.Release()
+		s.buffer, s.sample = nil, nil
+		return false, fmt.Errorf("locking sample buffer: %w", err)
+	}
 
 	// Make a Go slice view of the data for easy consumption.
-	s.data = unsafe.Slice((*byte)(s.chunk), s.chunkSz)
+	s.data = unsafe.Slice(s.chunk, s.chunkSz)
 
-	return true
+	return true, nil
 }
 
 // copyInto copies audio data into p, unlocking the memory once fully copied.
@@ -271,6 +305,7 @@ func (s *SourceReader) copyInto(p []byte) int {
 		s.buffer.Unlock()
 		s.buffer.Release()
 		s.sample.Release()
+		s.buffer, s.sample = nil, nil
 		s.data = nil
 	}
 
@@ -299,6 +334,7 @@ const (
 	MF_VERSION                                = 0x20070
 	MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED = 0x20
 	MF_SOURCE_READERF_ENDOFSTREAM             = 0x2
+	MF_SOURCE_READERF_ERROR                   = 0x1
 	MF_SOURCE_READER_ALL_STREAMS              = 0xfffffffe
 	MF_SOURCE_READER_FIRST_AUDIO_STREAM       = 0xfffffffd
 )
