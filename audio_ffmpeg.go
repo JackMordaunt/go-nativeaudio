@@ -20,7 +20,7 @@ import (
 
 // FFmpegPlay an audio file with ffplay.
 //
-// 	ffplay -vn <path> -nodisp -autoexit
+//	ffplay -vn <path> -nodisp -autoexit
 //
 // -vn: no video,
 // -nodisp: do not launch graphical window,
@@ -40,7 +40,7 @@ func FFmpegPlay(path string) error {
 
 // FFmpegLoad raw PCM with ffmpeg.
 //
-// 	ffmpeg -i <path> -f s16le -
+//	ffmpeg -i <path> -f s16le -
 //
 // s16le is the PCM format specifier, the final dash means "pipe to
 // stdout".
@@ -87,7 +87,7 @@ func (c *counter) Done() {
 
 // FFmpegDecode raw PCM with ffmpeg.
 //
-// 	ffmpeg -f m4a -i pipe: -f s16le -
+//	ffmpeg -f m4a -i pipe: -f s16le -
 //
 // s16le is the PCM format specifier, the final dash means "pipe to
 // stdout".
