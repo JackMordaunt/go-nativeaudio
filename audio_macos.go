@@ -34,7 +34,6 @@ SInt64 AudioFileGetSizeProcImpl(
 */
 import "C"
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -42,9 +41,6 @@ import (
 	"runtime"
 	"sync/atomic"
 	"unsafe"
-
-	"git.sr.ht/~jackmordaunt/nativeaudio/internal"
-	"github.com/ebitengine/oto/v3"
 )
 
 func start() error {
@@ -60,21 +56,7 @@ func play(path string) error {
 	if err != nil {
 		return err
 	}
-	ctx, ready, err := oto.NewContext(&oto.NewContextOptions{
-		SampleRate:   format.SampleRate,
-		ChannelCount: format.Channels,
-		Format:       oto.FormatSignedInt16LE,
-	})
-	if err != nil {
-		return fmt.Errorf("starting playback context: %w", err)
-	}
-	<-ready
-	done := make(chan any)
-	player := ctx.NewPlayer(internal.NewTriggerReader(bytes.NewReader(data), func() { close(done) }))
-	player.Play()
-	<-done
-	ctx.Suspend()
-	return player.Close()
+	return playPCM(data, format)
 }
 
 func load(path string) (_ []byte, f Format, _ error) {

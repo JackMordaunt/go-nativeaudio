@@ -1,7 +1,6 @@
 package nativeaudio
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -10,8 +9,6 @@ import (
 	"unicode/utf16"
 	"unsafe"
 
-	"git.sr.ht/~jackmordaunt/nativeaudio/internal"
-	"github.com/ebitengine/oto/v3"
 	"golang.org/x/sys/windows"
 )
 
@@ -29,21 +26,7 @@ func play(path string) error {
 	if err != nil {
 		return fmt.Errorf("decoding: %w", err)
 	}
-	ctx, ready, err := oto.NewContext(&oto.NewContextOptions{
-		SampleRate:   format.SampleRate,
-		ChannelCount: format.Channels,
-		Format:       oto.FormatSignedInt16LE,
-	})
-	if err != nil {
-		return fmt.Errorf("starting playback context: %w", err)
-	}
-	<-ready
-	done := make(chan any)
-	player := ctx.NewPlayer(internal.NewTriggerReader(bytes.NewReader(data), func() { close(done) }))
-	player.Play()
-	<-done
-	ctx.Suspend()
-	return player.Close()
+	return playPCM(data, format)
 }
 
 // load raw pcm data from the Windows Media Foundation.
