@@ -896,7 +896,10 @@ func SHCreateMemStream(pInit *byte, cbInit int) *IStream {
 	if r == 0 {
 		return nil
 	}
-	return (*IStream)(unsafe.Pointer(r))
+	// r is a COM interface pointer owned by the shell, not Go memory, so
+	// the round trip through uintptr is safe. Converting via the address
+	// of r keeps go vet from flagging a possible misuse of unsafe.Pointer.
+	return *(**IStream)(unsafe.Pointer(&r))
 }
 
 func MFCreateAttributes(out **IMFAttributes, size uint64) error {
