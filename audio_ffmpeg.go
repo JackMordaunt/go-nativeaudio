@@ -31,7 +31,7 @@ func FFmpegPlay(path string) error {
 		"-vn",
 		path,
 		"-nodisp",
-		"-autoext",
+		"-autoexit",
 	).CombinedOutput(); err != nil {
 		return fmt.Errorf("ffplay: %s: %w", string(out), err)
 	}
