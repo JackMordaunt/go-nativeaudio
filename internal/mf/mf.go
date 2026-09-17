@@ -22,9 +22,9 @@ import (
 
 // Format describes the PCM produced by Decode.
 type Format struct {
-	SampleRate int // samples per second.
-	Channels   int // number channels.
-	BitDepth   int // bytes per sample.
+	SampleRate     int // samples per second.
+	Channels       int // number channels.
+	BytesPerSample int // bytes per sample.
 }
 
 // Startup initialises Media Foundation and resolves the entry points
@@ -155,9 +155,9 @@ func getFormat(mt *IMFMediaType) (f Format, _ error) {
 	}
 
 	f = Format{
-		SampleRate: int(sampleRate),
-		Channels:   int(numChannels),
-		BitDepth:   int(bitsPerSample / 8),
+		SampleRate:     int(sampleRate),
+		Channels:       int(numChannels),
+		BytesPerSample: int(bitsPerSample / 8),
 	}
 
 	return f, nil

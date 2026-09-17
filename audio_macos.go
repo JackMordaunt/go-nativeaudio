@@ -244,7 +244,7 @@ func decode(buf []byte) (_ []byte, f Format, _ error) {
 	}
 
 	f.Channels = int(outputDescription.mChannelsPerFrame)
-	f.BitDepth = int(outputDescription.mBitsPerChannel / 8)
+	f.BytesPerSample = int(outputDescription.mBitsPerChannel / 8)
 	f.SampleRate = int(outputDescription.mSampleRate)
 
 	return out, f, nil

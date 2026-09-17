@@ -47,8 +47,8 @@ func playbackContext(f Format) (*oto.Context, error) {
 // playPCM plays s16le PCM synchronously through the shared oto context,
 // returning once the audio has finished.
 func playPCM(data []byte, format Format) error {
-	if format.BitDepth != 2 {
-		return fmt.Errorf("playback: unsupported sample size %d bytes, want 2", format.BitDepth)
+	if format.BytesPerSample != 2 {
+		return fmt.Errorf("playback: unsupported sample size %d bytes, want 2", format.BytesPerSample)
 	}
 	ctx, err := playbackContext(format)
 	if err != nil {

@@ -44,8 +44,8 @@ func TestLoad(t *testing.T) {
 	}
 	t.Logf("format: %+v", f)
 	// Check for known meta data values (ffprobe -i compressed.m4a).
-	if f.BitDepth != 2 {
-		t.Fatalf("unexpected bit depth: want 2, got %d", f.BitDepth)
+	if f.BytesPerSample != 2 {
+		t.Fatalf("unexpected bit depth: want 2, got %d", f.BytesPerSample)
 	}
 	if f.SampleRate != 44100 {
 		t.Fatalf("unexpected sample rate: want 44100, got %d", f.SampleRate)
@@ -71,8 +71,8 @@ func TestDecode(t *testing.T) {
 	}
 	t.Logf("format: %+v", f)
 	// Check for known meta data values (ffprobe -i compressed.m4a).
-	if f.BitDepth != 2 {
-		t.Fatalf("unexpected bit depth: want 2, got %d", f.BitDepth)
+	if f.BytesPerSample != 2 {
+		t.Fatalf("unexpected bit depth: want 2, got %d", f.BytesPerSample)
 	}
 	if f.SampleRate != 44100 {
 		t.Fatalf("unexpected sample rate: want 44100, got %d", f.SampleRate)

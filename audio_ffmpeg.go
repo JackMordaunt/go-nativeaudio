@@ -160,6 +160,6 @@ func (s stream) Format() (Format, error) {
 		Channels:   s.Channels,
 		// We are going to tell ffmpeg to output s16le, though there
 		// might be a better place to make this assumption.
-		BitDepth: 2,
+		BytesPerSample: 2,
 	}, nil
 }

@@ -74,7 +74,7 @@ func Decode(compressed []byte) (uncompressed []byte, format Format, err error) {
 // Format describes the features of the associated PCM data necessary
 // for correct playback.
 type Format struct {
-	SampleRate int // samples per second.
-	Channels   int // number channels.
-	BitDepth   int // bytes per sample.
+	SampleRate     int // samples per second.
+	Channels       int // number channels.
+	BytesPerSample int // bytes per sample; 2 for the s16le output this package produces.
 }

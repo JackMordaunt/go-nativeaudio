@@ -47,8 +47,8 @@ func decode(compressed []byte) (uncompressed []byte, format Format, err error) {
 		return nil, format, err
 	}
 	return pcm, Format{
-		SampleRate: f.SampleRate,
-		Channels:   f.Channels,
-		BitDepth:   f.BitDepth,
+		SampleRate:     f.SampleRate,
+		Channels:       f.Channels,
+		BytesPerSample: f.BytesPerSample,
 	}, nil
 }
