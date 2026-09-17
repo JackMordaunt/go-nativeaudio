@@ -1,6 +1,7 @@
-//go:build !(windows || darwin || linux) || !cgo
+//go:build !windows && (!(darwin || linux) || !cgo)
 
 // Shell out to ffmpeg if either the OS is unknown or cgo is disabled.
+// Windows is pure Go and never falls through to this file.
 
 package nativeaudio
 
