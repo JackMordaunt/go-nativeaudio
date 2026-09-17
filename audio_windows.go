@@ -197,7 +197,7 @@ type SourceReader struct {
 	sample  *IMFSample      // sample object containing one or more streams
 	buffer  *IMFMediaBuffer // buffer object containing the raw buffer
 	chunk   *byte           // start of chunk of audio data
-	chunkSz int64           // size of chunk
+	chunkSz uint32          // size of chunk
 
 	prevTimestamp    int64
 	currentTimestamp int64
@@ -231,7 +231,7 @@ func (s *SourceReader) Read(p []byte) (int, error) {
 // next reads the next audio sample, returning true if found, or false if EOF.
 func (s *SourceReader) next() bool {
 	for {
-		var flags int64
+		var flags uint32
 
 		// Read the next sample; skipping samples with matching time stamps.
 		// For some reason ReadSample can produce more than one sample at time 0.
@@ -588,7 +588,7 @@ func (v *IMFSourceReader) Release() error {
 	return nil
 }
 
-func (v *IMFSourceReader) SetStreamSelection(index int64, selected bool) error {
+func (v *IMFSourceReader) SetStreamSelection(index uint32, selected bool) error {
 	r, _, _ := syscall.SyscallN(
 		v.VTable.SetStreamSelection,
 		uintptr(unsafe.Pointer(v)),
@@ -601,7 +601,7 @@ func (v *IMFSourceReader) SetStreamSelection(index int64, selected bool) error {
 	return nil
 }
 
-func (v *IMFSourceReader) SetCurrentMediaType(index int64, mt *IMFMediaType) error {
+func (v *IMFSourceReader) SetCurrentMediaType(index uint32, mt *IMFMediaType) error {
 	r, _, _ := syscall.SyscallN(
 		v.VTable.SetCurrentMediaType,
 		uintptr(unsafe.Pointer(v)),
@@ -615,7 +615,7 @@ func (v *IMFSourceReader) SetCurrentMediaType(index int64, mt *IMFMediaType) err
 	return nil
 }
 
-func (v *IMFSourceReader) GetCurrentMediaType(index int64, mt **IMFMediaType) error {
+func (v *IMFSourceReader) GetCurrentMediaType(index uint32, mt **IMFMediaType) error {
 	r, _, _ := syscall.SyscallN(
 		v.VTable.GetCurrentMediaType,
 		uintptr(unsafe.Pointer(v)),
@@ -628,7 +628,7 @@ func (v *IMFSourceReader) GetCurrentMediaType(index int64, mt **IMFMediaType) er
 	return nil
 }
 
-func (v *IMFSourceReader) ReadSample(index, controlFlags int64, actualIndex *int64, streamFlags *int64, timestamp *int64, sample **IMFSample) error {
+func (v *IMFSourceReader) ReadSample(index, controlFlags uint32, actualIndex *uint32, streamFlags *uint32, timestamp *int64, sample **IMFSample) error {
 	r, _, _ := syscall.SyscallN(
 		v.VTable.ReadSample,
 		uintptr(unsafe.Pointer(v)),
@@ -754,13 +754,13 @@ func (v *IMFMediaBuffer) Release() error {
 	return nil
 }
 
-func (v *IMFMediaBuffer) Lock(buf **byte, length, capacity *int64) error {
+func (v *IMFMediaBuffer) Lock(buf **byte, maxLength, currentLength *uint32) error {
 	r, _, _ := syscall.SyscallN(
 		v.VTable.Lock,
 		uintptr(unsafe.Pointer(v)),
 		uintptr(unsafe.Pointer(buf)),
-		uintptr(unsafe.Pointer(length)),
-		uintptr(unsafe.Pointer(capacity)),
+		uintptr(unsafe.Pointer(maxLength)),
+		uintptr(unsafe.Pointer(currentLength)),
 	)
 	if r != S_OK {
 		return MFErr{Code: r}
