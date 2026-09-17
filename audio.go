@@ -1,7 +1,7 @@
 // Package nativeaudio leverages native decoders for each supported OS
 // to decode raw PCM data.
 //
-// Where there are native APIs to call we default to invoking ffmpeg.
+// Where there are no native APIs to call we default to invoking ffmpeg.
 //
 //	Windows: Media Foundation
 //	  macOS: AudioToolbox
@@ -46,6 +46,10 @@ func End() error {
 }
 
 // Play an audio file exactly once, synchronously.
+//
+// On Windows and macOS playback goes through a single process-wide audio
+// context whose sample rate and channel count are fixed by the first file
+// played; later files must share that format.
 func Play(path string) error {
 	if err := Start(); err != nil {
 		return err

@@ -1,7 +1,7 @@
 // This file is a temporary audio implementation for macOS and Linux
 // platforms. For Linux I suspect ffmpeg will be the defacto, but macOS
 // ships an AAC decoder that we can access directly. That is preferable
-// to relying on the ffmepg binary being present since we'd have to
+// to relying on the ffmpeg binary being present since we'd have to
 // provide one or hope for the best.
 
 package nativeaudio
