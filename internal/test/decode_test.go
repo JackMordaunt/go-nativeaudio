@@ -3,6 +3,7 @@ package test
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -54,7 +55,7 @@ func TestDecodeFormats(t *testing.T) {
 		{48000, 2},
 	}
 	for _, c := range cases {
-		by, f, err := nativeaudio.Decode(silentWAV(c.rate, c.channels, 1))
+		by, f, err := newDecoder(t).Decode(silentWAV(c.rate, c.channels, 1))
 		if err != nil {
 			t.Errorf("%d Hz %d ch: unexpected error: %v", c.rate, c.channels, err)
 			continue
@@ -71,28 +72,50 @@ func TestDecodeFormats(t *testing.T) {
 
 // TestLoadMissingFile ensures a bad path is reported as an error.
 func TestLoadMissingFile(t *testing.T) {
-	if _, _, err := nativeaudio.Load(filepath.Join(t.TempDir(), "does-not-exist.m4a")); err == nil {
+	if _, _, err := newDecoder(t).DecodeFile(filepath.Join(t.TempDir(), "does-not-exist.m4a")); err == nil {
 		t.Fatal("expected error for missing file, got nil")
 	}
 }
 
 // TestStartEndCycle ensures the platform can be torn down and brought
 // back up repeatedly, with a decode in between to prove each Start took.
-func TestStartEndCycle(t *testing.T) {
+func TestDecoderLifecycle(t *testing.T) {
+	// Several create-and-close cycles, with a decode in between to prove
+	// each New actually initialised the platform.
 	for i := 0; i < 3; i++ {
-		if err := nativeaudio.Start(); err != nil {
-			t.Fatalf("cycle %d: Start: %v", i, err)
+		d, err := nativeaudio.New()
+		if err != nil {
+			t.Fatalf("cycle %d: New: %v", i, err)
 		}
-		if _, _, err := nativeaudio.Decode(compressed); err != nil {
+		if _, _, err := d.Decode(compressed); err != nil {
 			t.Fatalf("cycle %d: Decode: %v", i, err)
 		}
-		if err := nativeaudio.End(); err != nil {
-			t.Fatalf("cycle %d: End: %v", i, err)
+		if err := d.Close(); err != nil {
+			t.Fatalf("cycle %d: Close: %v", i, err)
+		}
+		if err := d.Close(); err != nil {
+			t.Fatalf("cycle %d: second Close should be a no-op: %v", i, err)
+		}
+		if _, _, err := d.Decode(compressed); !errors.Is(err, nativeaudio.ErrClosed) {
+			t.Fatalf("cycle %d: decode after close: want ErrClosed, got %v", i, err)
 		}
 	}
-	// Leave the platform started for the other tests, as they expect.
-	if err := nativeaudio.Start(); err != nil {
-		t.Fatalf("final Start: %v", err)
+}
+
+// TestDecodersAreIndependent ensures closing one Decoder does not tear
+// the platform out from under another. This is the whole reason the API
+// is a value rather than a set of package functions.
+func TestDecodersAreIndependent(t *testing.T) {
+	a, err := nativeaudio.New()
+	if err != nil {
+		t.Fatalf("first New: %v", err)
+	}
+	b := newDecoder(t)
+	if err := a.Close(); err != nil {
+		t.Fatalf("closing first: %v", err)
+	}
+	if _, _, err := b.Decode(compressed); err != nil {
+		t.Fatalf("second decoder broke when the first closed: %v", err)
 	}
 }
 
@@ -113,7 +136,7 @@ func TestDecodeCorruptMidStream(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		by, _, err := nativeaudio.Decode(bad)
+		by, _, err := newDecoder(t).Decode(bad)
 		done <- result{len(by), err}
 	}()
 	select {
@@ -122,4 +145,19 @@ func TestDecodeCorruptMidStream(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("decode did not return within 30s")
 	}
+}
+
+// newDecoder returns a Decoder that is closed when the test ends.
+func newDecoder(t testing.TB) *nativeaudio.Decoder {
+	t.Helper()
+	d, err := nativeaudio.New()
+	if err != nil {
+		t.Fatalf("creating decoder: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := d.Close(); err != nil {
+			t.Errorf("closing decoder: %v", err)
+		}
+	})
+	return d
 }

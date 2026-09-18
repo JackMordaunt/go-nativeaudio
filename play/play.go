@@ -84,7 +84,12 @@ func PCM(pcm []byte, format nativeaudio.Format) error {
 
 // File decodes an audio file and plays it once, synchronously.
 func File(path string) error {
-	pcm, format, err := nativeaudio.Load(path)
+	d, err := nativeaudio.New()
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	pcm, format, err := d.DecodeFile(path)
 	if err != nil {
 		return fmt.Errorf("decoding %q: %w", path, err)
 	}
@@ -93,7 +98,12 @@ func File(path string) error {
 
 // Data decodes compressed audio and plays it once, synchronously.
 func Data(compressed []byte) error {
-	pcm, format, err := nativeaudio.Decode(compressed)
+	d, err := nativeaudio.New()
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	pcm, format, err := d.Decode(compressed)
 	if err != nil {
 		return fmt.Errorf("decoding: %w", err)
 	}

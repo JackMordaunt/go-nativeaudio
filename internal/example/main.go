@@ -12,7 +12,12 @@ func main() {
 	if err != nil {
 		panic(fmt.Errorf("reading file: %w", err))
 	}
-	data, format, err := nativeaudio.Decode(by)
+	d, err := nativeaudio.New()
+	if err != nil {
+		panic(fmt.Errorf("creating decoder: %w", err))
+	}
+	defer d.Close()
+	data, format, err := d.Decode(by)
 	if err != nil {
 		panic(fmt.Errorf("decoding audio: %w", err))
 	}

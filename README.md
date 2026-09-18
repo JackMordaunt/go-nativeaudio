@@ -25,36 +25,55 @@ take the performance hit of using a sub-process.
 package main
 
 import (
+	"log"
+
 	"git.sr.ht/~jackmordaunt/nativeaudio"
-	"git.sr.ht/~jackmordaunt/nativeaudio/play"
 )
 
 func main() {
-	// Decode to PCM and hand it to whatever audio stack you use.
-	pcm, format, err := nativeaudio.Load("audio.m4a")
-	_, _, _ = pcm, format, err
+	d, err := nativeaudio.New()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer d.Close()
 
-	// Or use the playback helper.
-	play.File("audio.m4a")
+	pcm, format, err := d.DecodeFile("audio.m4a")
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("%d bytes of PCM, %+v", len(pcm), format)
 }
+```
+
+Or, to just hear it:
+
+```go
+import "git.sr.ht/~jackmordaunt/nativeaudio/play"
+
+play.File("audio.m4a")
 ```
 
 ## API
 
-- `Load(path)` and `Decode(data)` return s16le PCM and a `Format`. This is
-  the core of the package and has no audio-output dependency.
+- `New()` returns a `Decoder` holding the platform state. Close it when you
+  are done. Independent parts of a program can each hold their own, and
+  closing one does not disturb another.
+- `Decoder.DecodeFile(path)` and `Decoder.Decode(data)` return s16le PCM
+  and a `Format`. The core package has no audio-output dependency.
 - `Format` reports `SampleRate`, `Channels` and `BytesPerSample`, which is
   always 2.
-- `Start()` and `End()` initialise and tear down platform state. The
-  functions above call `Start()` for you; call `End()` when you are done.
+- A `Decoder` is safe for concurrent use, and `Close` waits for decodes
+  already in flight.
 - `FFmpegLoad` and `FFmpegDecode` shell out to ffmpeg regardless of
-  platform.
+  platform, and need no `Decoder`.
 - The `play` subpackage plays PCM through oto on every platform. Its
   context is fixed to the first file's sample rate and channel count for
   the life of the process.
 
-v1.0.0 renamed `Format.BitDepth` to `BytesPerSample` and removed the
-Windows Media Foundation bindings from the public API.
+v1.0.0 replaced the package-level `Start`, `End`, `Load`, `Decode` and
+`Play` with a `Decoder` value and the `play` subpackage, renamed
+`Format.BitDepth` to `BytesPerSample`, and made the Windows Media
+Foundation bindings internal.
 
 ## TODO 
 

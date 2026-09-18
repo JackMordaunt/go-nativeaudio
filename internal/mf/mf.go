@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"runtime"
+	"sync"
 	"syscall"
 	"unicode/utf16"
 	"unsafe"
@@ -808,7 +809,12 @@ var (
 	_MFCreateSourceReaderFromByteStream *windows.Proc
 )
 
-func MFStartup(version, flags uintptr) (err error) {
+var loadOnce sync.Once
+
+// loadProcs resolves the DLLs and entry points once per process. The
+// handles stay valid for the life of the process, so repeated Startup
+// and Shutdown cycles reuse them.
+func loadProcs() (err error) {
 	_mfplat, err = windows.LoadDLL("Mfplat.dll")
 	if err != nil {
 		return fmt.Errorf("Mfplat.dll: %w", err)
@@ -848,6 +854,18 @@ func MFStartup(version, flags uintptr) (err error) {
 	_MFCreateSourceReaderFromByteStream, err = _mfreadwrite.FindProc("MFCreateSourceReaderFromByteStream")
 	if err != nil {
 		return fmt.Errorf("MFCreateSourceReaderFromByteStream: %w", err)
+	}
+
+	return nil
+}
+
+// MFStartup initialises Media Foundation. The platform refcounts this
+// against MFShutdown, so callers must pair them.
+func MFStartup(version, flags uintptr) error {
+	var loadErr error
+	loadOnce.Do(func() { loadErr = loadProcs() })
+	if loadErr != nil {
+		return loadErr
 	}
 
 	r, _, _ := _MFStartup.Call(version, flags)

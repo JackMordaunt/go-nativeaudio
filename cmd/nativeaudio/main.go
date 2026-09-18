@@ -26,7 +26,12 @@ func main() {
 
 func run() error {
 	if out != "" {
-		un, _, err := nativeaudio.Load(in)
+		d, err := nativeaudio.New()
+		if err != nil {
+			return err
+		}
+		defer d.Close()
+		un, _, err := d.DecodeFile(in)
 		if err != nil {
 			return fmt.Errorf("loading audio file: %w", err)
 		}

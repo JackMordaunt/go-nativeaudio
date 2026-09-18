@@ -38,7 +38,7 @@ func getUncompressed() []byte {
 // TestLoad ensures that output from the native decoders are close to
 // the output of ffmpeg.
 func TestLoad(t *testing.T) {
-	by, f, err := nativeaudio.Load("compressed.m4a")
+	by, f, err := newDecoder(t).DecodeFile("compressed.m4a")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestLoad(t *testing.T) {
 // TestDecode ensures that output from the native decoders are similar to
 // the output of ffmpeg.
 func TestDecode(t *testing.T) {
-	by, f, err := nativeaudio.Decode(compressed)
+	by, f, err := newDecoder(t).Decode(compressed)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestDecode(t *testing.T) {
 // TestDecodeCorrupt ensures that we get an error value on invalid input and
 // that we don't crash the process.
 func TestDecodeCorrupt(t *testing.T) {
-	_, f, err := nativeaudio.Decode(corrupt)
+	_, f, err := newDecoder(t).Decode(corrupt)
 	if err == nil {
 		t.Fatalf("expected error for corrupt audio data, got nil")
 	}
@@ -104,15 +104,24 @@ func TestDecodeCorrupt(t *testing.T) {
 func TestMemoryLeak(t *testing.T) {
 	runtime.MemProfileRate = 1
 
-	for ii := 0; ii < 10; ii++ {
-		by, f, err := nativeaudio.Load("compressed.m4a")
+	// Scoped so the Decoder itself is unreachable before the profile is
+	// taken. Holding it live would show up here as an allocation that
+	// was never freed, which is exactly what this test looks for.
+	func() {
+		d, err := nativeaudio.New()
 		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+			t.Fatalf("creating decoder: %v", err)
 		}
-		_ = by
-		_ = f
-		_ = err
-	}
+		defer d.Close()
+		for ii := 0; ii < 10; ii++ {
+			by, f, err := d.DecodeFile("compressed.m4a")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			_ = by
+			_ = f
+		}
+	}()
 
 	runtime.GC()
 	runtime.GC()
@@ -189,8 +198,10 @@ func abs(n int) int {
 
 func BenchmarkDecode(b *testing.B) {
 	b.Run("native-decode", func(b *testing.B) {
+		d := newDecoder(b)
+		b.ResetTimer()
 		for ii := 0; ii < b.N; ii++ {
-			by, f, err := nativeaudio.Decode(compressed)
+			by, f, err := d.Decode(compressed)
 			if err != nil {
 				b.Fatalf("unexpected error during decode: %v", err)
 			}
