@@ -8,6 +8,17 @@ package nativeaudio
 
 #include <AudioToolbox/AudioToolbox.h>
 #include <AVFoundation/AVFoundation.h>
+#include <stdint.h>
+
+// handleToPointer widens a runtime/cgo handle into the void* these
+// AudioToolbox interfaces take for caller data.
+//
+// The cast belongs on this side. A cgo handle is an integer, and turning
+// an integer into a pointer in Go is the very thing the unsafe pointer
+// rules forbid.
+static void *handleToPointer(uintptr_t handle) {
+	return (void *)handle;
+}
 
 // Pre-declare exported Go functions to make them visible in the
 // C pseudo package.
@@ -39,6 +50,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"runtime/cgo"
 	"sync/atomic"
 	"unsafe"
 )
@@ -71,11 +83,10 @@ func decode(buf []byte) (_ []byte, f Format, _ error) {
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
 
-	pinner.Pin(&buf)
-	pinner.Pin(unsafe.SliceData(buf))
-
-	// Allocate an "AudioFile" backed by a byte slice.
-	inputFile, err := OpenAudioFileBuffer(&buf)
+	// Allocate an "AudioFile" backed by a byte slice. The handle inside
+	// keeps buf reachable for as long as AudioToolbox can call back, so
+	// neither the slice nor its data needs pinning.
+	inputFile, err := OpenAudioFileBuffer(buf)
 	if err != nil {
 		return nil, f, fmt.Errorf("opening file with callbacks: %w", err)
 	}
@@ -186,7 +197,11 @@ func decode(buf []byte) (_ []byte, f Format, _ error) {
 	)
 
 	pinner.Pin(unsafe.SliceData(ic.mPacketDescriptions))
-	pinner.Pin(ic)
+
+	// The converter keeps this caller data across callbacks, so it goes
+	// across as a handle rather than as a Go pointer.
+	icHandle := cgo.NewHandle(ic)
+	defer icHandle.Delete()
 
 	// Adjusting this will tradeoff latency against throughput.
 	// Given that we aren't streaming, throughput is preferable.
@@ -218,7 +233,7 @@ func decode(buf []byte) (_ []byte, f Format, _ error) {
 
 		if err := audioConverter.FillComplexBuffer(
 			(C.AudioConverterComplexInputDataProc)(C.InputDataProc),
-			unsafe.Pointer(ic),
+			C.handleToPointer(C.uintptr_t(icHandle)),
 			&numPackets,
 			&abl,
 			nil,
@@ -304,6 +319,12 @@ func (ac *AudioConverter) Dispose() {
 type AudioFile struct {
 	id         C.AudioFileID
 	nextPacket C.SInt64
+
+	// data holds the Go buffer this file reads from, when it was opened
+	// from one. AudioToolbox keeps the caller data across callbacks, so
+	// it cannot be a Go pointer; a handle is an opaque integer the
+	// runtime resolves back for us. Disposing the file releases it.
+	data cgo.Handle
 }
 
 func OpenAudioFile(path string) (*AudioFile, error) {
@@ -339,13 +360,15 @@ func OpenAudioFile(path string) (*AudioFile, error) {
 // This could be made lazy by wrapping an [io.Reader] instead.
 //
 // Make sure that [buf] is pinned.
-func OpenAudioFileBuffer(buf *[]byte) (*AudioFile, error) {
+func OpenAudioFileBuffer(buf []byte) (*AudioFile, error) {
 	var outAudioFile C.AudioFileID
+
+	handle := cgo.NewHandle(buf)
 
 	// WriteProc and SetSizeProc must be nil, otherwise AudioToolbox considers
 	// it a writeable file, which restricts what formats it can accept.
 	if err := C.AudioFileOpenWithCallbacks(
-		unsafe.Pointer(buf),
+		C.handleToPointer(C.uintptr_t(handle)),
 		(C.AudioFile_ReadProc)(C.AudioFileReadProcImpl),
 		nil,
 		(C.AudioFile_GetSizeProc)(C.AudioFileGetSizeProcImpl),
@@ -353,10 +376,11 @@ func OpenAudioFileBuffer(buf *[]byte) (*AudioFile, error) {
 		0,
 		&outAudioFile,
 	); err != C.noErr {
+		handle.Delete()
 		return nil, fmt.Errorf("AudioFileOpenWithCallbacks: %v", err)
 	}
 
-	return &AudioFile{id: outAudioFile}, nil
+	return &AudioFile{id: outAudioFile, data: handle}, nil
 }
 
 func (af *AudioFile) ID() C.AudioFileID {
@@ -365,6 +389,10 @@ func (af *AudioFile) ID() C.AudioFileID {
 
 func (af *AudioFile) Dispose() {
 	C.AudioFileClose(af.id)
+	if af.data != 0 {
+		af.data.Delete()
+		af.data = 0
+	}
 }
 
 func (af *AudioFile) NextPacket() C.SInt64 {
@@ -477,7 +505,7 @@ func InputDataProc(
 	outDataPacketDescription **C.AudioStreamPacketDescription,
 	inUserData unsafe.Pointer,
 ) C.OSStatus {
-	ic := (*InputContext)(inUserData)
+	ic := cgo.Handle(uintptr(inUserData)).Value().(*InputContext)
 
 	if ic.mInputUsesPacketDescriptions == _true {
 		// Cap the number of data packets to the capacity of the slice.
@@ -514,7 +542,7 @@ func AudioFileReadProcImpl(
 	req := int(requestCount)
 	end := pos + req
 
-	inBuf := *(*[]byte)(inClientData)
+	inBuf := cgo.Handle(uintptr(inClientData)).Value().([]byte)
 
 	// Assuming the the out buffer is sized to contain the requested number of bytes.
 	// This is not memory we control.
@@ -542,7 +570,7 @@ func AudioFileReadProcImpl(
 func AudioFileGetSizeProcImpl(
 	inClientData unsafe.Pointer,
 ) C.SInt64 {
-	inBuf := *(*[]byte)(inClientData)
+	inBuf := cgo.Handle(uintptr(inClientData)).Value().([]byte)
 	return C.SInt64(cap(inBuf))
 }
 
