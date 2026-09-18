@@ -51,14 +51,6 @@ func end() error {
 	return nil
 }
 
-func play(path string) error {
-	data, format, err := load(path)
-	if err != nil {
-		return err
-	}
-	return playPCM(data, format)
-}
-
 func load(path string) (_ []byte, f Format, _ error) {
 	inputf, err := os.Open(path)
 	if err != nil {

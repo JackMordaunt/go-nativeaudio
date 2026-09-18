@@ -16,26 +16,6 @@ import (
 	"strings"
 )
 
-// FFmpegPlay an audio file with ffplay.
-//
-//	ffplay -vn <path> -nodisp -autoexit
-//
-// -vn: no video,
-// -nodisp: do not launch graphical window,
-// -autoexit: exit the process after playback is complete.
-func FFmpegPlay(path string) error {
-	if out, err := exec.Command(
-		"ffplay",
-		"-vn",
-		path,
-		"-nodisp",
-		"-autoexit",
-	).CombinedOutput(); err != nil {
-		return fmt.Errorf("ffplay: %s: %w", string(out), err)
-	}
-	return nil
-}
-
 // FFmpegLoad raw PCM with ffmpeg.
 //
 //	ffmpeg -i <path> -f s16le -

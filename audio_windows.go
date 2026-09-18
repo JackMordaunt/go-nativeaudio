@@ -16,15 +16,6 @@ func end() error {
 	return mf.Shutdown()
 }
 
-// play the audio file using Windows Media Foundation.
-func play(path string) error {
-	data, format, err := load(path)
-	if err != nil {
-		return fmt.Errorf("decoding: %w", err)
-	}
-	return playPCM(data, format)
-}
-
 // load raw pcm data from the Windows Media Foundation.
 func load(path string) (uncompressed []byte, format Format, err error) {
 	f, err := os.Open(path)

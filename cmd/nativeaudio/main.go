@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"git.sr.ht/~jackmordaunt/nativeaudio"
+	"git.sr.ht/~jackmordaunt/nativeaudio/play"
 )
 
 var (
@@ -34,7 +35,7 @@ func run() error {
 		}
 		return nil
 	}
-	if err := nativeaudio.Play(in); err != nil {
+	if err := play.File(in); err != nil {
 		return fmt.Errorf("playing audio file: %w", err)
 	}
 	return nil

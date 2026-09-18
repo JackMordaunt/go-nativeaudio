@@ -45,18 +45,6 @@ func End() error {
 	return nil
 }
 
-// Play an audio file exactly once, synchronously.
-//
-// On Windows and macOS playback goes through a single process-wide audio
-// context whose sample rate and channel count are fixed by the first file
-// played; later files must share that format.
-func Play(path string) error {
-	if err := Start(); err != nil {
-		return err
-	}
-	return play(path)
-}
-
 // Load compressed data, returning the uncompressed data as PCM data
 // (s16le) and details about the PCM required to playback correctly.
 func Load(path string) (uncompressed []byte, format Format, err error) {

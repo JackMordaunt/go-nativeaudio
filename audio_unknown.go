@@ -5,11 +5,6 @@
 
 package nativeaudio
 
-// play audio with ffmpeg.
-func play(path string) error {
-	return FFmpegPlay(path)
-}
-
 // load and decode an audio file with ffmpeg.
 func load(path string) ([]byte, Format, error) {
 	return FFmpegLoad(path)

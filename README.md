@@ -22,26 +22,36 @@ take the performance hit of using a sub-process.
 `go get git.sr.ht/~jackmordaunt/nativeaudio`
 
 ```go
-package main 
+package main
 
-import "git.sr.ht/~jackmordaunt/nativeaudio"
+import (
+	"git.sr.ht/~jackmordaunt/nativeaudio"
+	"git.sr.ht/~jackmordaunt/nativeaudio/play"
+)
 
 func main() {
-        nativeaudio.Play("audio.m4a")
+	// Decode to PCM and hand it to whatever audio stack you use.
+	pcm, format, err := nativeaudio.Load("audio.m4a")
+	_, _, _ = pcm, format, err
+
+	// Or use the playback helper.
+	play.File("audio.m4a")
 }
 ```
 
 ## API
 
-- `Play(path)` decodes a file and plays it synchronously. On Windows and
-  macOS the playback context is fixed to the first file's sample rate and
-  channel count for the life of the process.
-- `Load(path)` and `Decode(data)` return s16le PCM together with a
-  `Format` giving `SampleRate`, `Channels` and `BytesPerSample` (always 2).
+- `Load(path)` and `Decode(data)` return s16le PCM and a `Format`. This is
+  the core of the package and has no audio-output dependency.
+- `Format` reports `SampleRate`, `Channels` and `BytesPerSample`, which is
+  always 2.
 - `Start()` and `End()` initialise and tear down platform state. The
   functions above call `Start()` for you; call `End()` when you are done.
-- `FFmpegPlay`, `FFmpegLoad` and `FFmpegDecode` shell out to ffmpeg
-  regardless of platform.
+- `FFmpegLoad` and `FFmpegDecode` shell out to ffmpeg regardless of
+  platform.
+- The `play` subpackage plays PCM through oto on every platform. Its
+  context is fixed to the first file's sample rate and channel count for
+  the life of the process.
 
 v1.0.0 renamed `Format.BitDepth` to `BytesPerSample` and removed the
 Windows Media Foundation bindings from the public API.
