@@ -234,6 +234,13 @@ func configureAudioStream(pReader *IMFSourceReader) error {
 		return fmt.Errorf("setting sub type: %w", err)
 	}
 
+	// Pin the sample size. Asking only for PCM lets the reader hand back
+	// whatever width the source happens to use, so a 24-bit file decodes
+	// to 24-bit and breaks the s16le output this package promises.
+	if err := pPartialType.SetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE, 16); err != nil {
+		return fmt.Errorf("setting bits per sample: %w", err)
+	}
+
 	// Select the first audio stream, and deselect all other streams.
 	if err := pReader.SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS, false); err != nil {
 		return fmt.Errorf("deselecting audio streams: %w", err)
@@ -769,6 +776,20 @@ func (v *IMFMediaType) SetGUID(guid *GUID, value *GUID) error {
 		uintptr(unsafe.Pointer(v)),
 		uintptr(unsafe.Pointer(guid)),
 		uintptr(unsafe.Pointer(value)),
+	)
+	if r != S_OK {
+		return MFErr{Code: r}
+	}
+	return nil
+}
+
+// SetUINT32 stores an unsigned 32-bit attribute on the media type.
+func (v *IMFMediaType) SetUINT32(guid *GUID, value uint32) error {
+	r, _, _ := syscall.SyscallN(
+		v.VTable.SetUINT32,
+		uintptr(unsafe.Pointer(v)),
+		uintptr(unsafe.Pointer(guid)),
+		uintptr(value),
 	)
 	if r != S_OK {
 		return MFErr{Code: r}
