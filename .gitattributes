@@ -1,0 +1,14 @@
+# Go tooling writes LF, and gofmt reports a CRLF file as unformatted. Without
+# this, a checkout on Windows converts line endings and every source file
+# looks misformatted to CI.
+*.go text eol=lf
+*.mod text eol=lf
+*.sum text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+
+# Audio fixtures and golden PCM must never be translated.
+*.m4a binary
+*.wav binary
+*.pcm binary
+*.aac binary

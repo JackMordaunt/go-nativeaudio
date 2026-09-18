@@ -1,0 +1,149 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # ffmpeg is the decode backend on Linux, so it is required rather than
+      # optional there. The ALSA headers are for the play subpackage, whose
+      # audio backend reaches them through pkg-config.
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg pkg-config libasound2-dev
+
+      - name: Install ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+
+      - name: gofmt
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      # Failures are copied into the job summary, which is readable without
+      # signing in. Raw logs are not, and a red run nobody can diagnose is
+      # barely better than no run at all.
+      #
+      # The race detector needs a C toolchain, which is not guaranteed on
+      # the Windows runner, so it is skipped there.
+      - name: Test
+        shell: bash
+        run: |
+          race=-race
+          if [ "$RUNNER_OS" = "Windows" ]; then race=""; fi
+          set -o pipefail
+          if go test $race -count=1 -timeout 5m ./... 2>&1 | tee test.log; then
+            exit 0
+          fi
+          {
+            echo "### Test failures on $RUNNER_OS"
+            echo '```'
+            grep -E '^(--- |=== RUN|FAIL|panic|\s+--- )|_test\.go:' test.log | head -100
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Also emit them as annotations. Summaries and raw logs both need
+          # a sign-in to read; annotations do not, and this repository is a
+          # mirror people land on without credentials.
+          grep -E '^(--- FAIL|FAIL|panic)|_test\.go:[0-9]+:|running tests:|^[[:space:]]+(Test|Fuzz)[A-Za-z0-9_]* \(' test.log | head -30 | while IFS= read -r line; do
+            echo "::error::$RUNNER_OS: $line"
+          done
+          exit 1
+
+      # The support matrix in the readme is meant to be measured rather
+      # than copied from vendor documentation, and this is where the
+      # measuring happens. Notices are readable without signing in, so
+      # each platform publishes its own row.
+      - name: Publish the format support matrix
+        if: always()
+        shell: bash
+        run: |
+          rows=$(go test ./internal/test -run TestFormatSupport -v 2>&1 |
+            grep -o 'MATRIX .*' | sed 's/^MATRIX //')
+          # One annotation, not one per row: only the first ten of each
+          # kind are kept per step, and the matrix is longer than that.
+          echo "::notice::$RUNNER_OS format support%0A${rows//$'\n'/%0A}"
+
+  crossbuild:
+    name: cross-compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # Needed to build the play subpackage for linux with cgo enabled.
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libasound2-dev
+
+      # The core package is meant to build anywhere, including targets with
+      # no native decoder and no cgo, where it falls back to ffmpeg.
+      - name: Build the core package for every target
+        shell: bash
+        run: |
+          set -euo pipefail
+          while read -r goos goarch cgo; do
+            echo "== GOOS=$goos GOARCH=$goarch CGO_ENABLED=$cgo"
+            GOOS=$goos GOARCH=$goarch CGO_ENABLED=$cgo go build .
+          done <<'TARGETS'
+          linux amd64 1
+          linux amd64 0
+          linux arm64 0
+          windows amd64 1
+          windows amd64 0
+          darwin arm64 0
+          freebsd amd64 0
+          TARGETS
+
+      # The play subpackage is bounded by what its audio backend supports:
+      # oto needs cgo on Linux and has no FreeBSD backend at all. Keeping
+      # this list separate is the point of the split, so a regression in
+      # core portability cannot hide behind playback requirements.
+      - name: Build the whole module where playback is supported
+        shell: bash
+        run: |
+          set -euo pipefail
+          while read -r goos goarch cgo; do
+            echo "== GOOS=$goos GOARCH=$goarch CGO_ENABLED=$cgo"
+            GOOS=$goos GOARCH=$goarch CGO_ENABLED=$cgo go build ./...
+          done <<'TARGETS'
+          linux amd64 1
+          windows amd64 1
+          windows amd64 0
+          darwin arm64 0
+          TARGETS
