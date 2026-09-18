@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // FFmpegLoad raw PCM with ffmpeg.
@@ -176,16 +177,42 @@ func (f *ffmpegStream) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// reapTimeout bounds how long Close waits for an abandoned ffmpeg to go
+// away before leaving it to finish on its own.
+const reapTimeout = 5 * time.Second
+
 func (f *ffmpegStream) Close() error {
-	if !f.drained {
-		// Abandoned early. Kill it rather than leave ffmpeg blocked
-		// writing into a pipe nobody is reading, then reap the corpse.
-		// The resulting wait error is ours, not a decode failure.
-		_ = f.cmd.Process.Kill()
-		_ = f.reap()
-		return nil
+	if f.drained {
+		return f.reap()
 	}
-	return f.reap()
+
+	// Abandoned early. Kill it rather than leave ffmpeg blocked writing
+	// into a pipe nobody is reading.
+	_ = f.cmd.Process.Kill()
+
+	// Waiting on a command wants its pipes drained first, and the wait
+	// itself only returns once nothing holds the far end. Neither is
+	// guaranteed when ffmpeg is reached through a launcher shim, since
+	// killing the shim leaves the real process running and holding the
+	// pipe. CI found exactly that: closing an abandoned stream never
+	// returned on a runner whose ffmpeg came from a package manager that
+	// installs one.
+	//
+	// So the teardown gets a deadline. Whatever is still holding the pipe
+	// finishes decoding shortly and exits on its own, which makes this a
+	// brief leak rather than a caller that never returns.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(io.Discard, f.stdout)
+		_ = f.reap()
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(reapTimeout):
+	}
+	return nil
 }
 
 // FFmpegStream decodes an audio file with ffmpeg, returning PCM through
