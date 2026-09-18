@@ -15,6 +15,7 @@ package nativeaudio
 import (
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 )
 
@@ -35,15 +36,28 @@ type Decoder struct {
 	mu      sync.RWMutex
 	closed  bool
 	streams sync.WaitGroup
+	limits  Limits
+}
+
+// Option configures a Decoder at construction.
+type Option func(*Decoder)
+
+// WithLimits bounds what a single decode may consume. See [Limits].
+func WithLimits(l Limits) Option {
+	return func(d *Decoder) { d.limits = l }
 }
 
 // New creates a Decoder, initialising any platform state the backend
 // needs. Call Close when you are finished with it.
-func New() (*Decoder, error) {
+func New(opts ...Option) (*Decoder, error) {
 	if err := start(); err != nil {
 		return nil, fmt.Errorf("initialising platform decoder: %w", err)
 	}
-	return &Decoder{}, nil
+	d := &Decoder{limits: DefaultLimits()}
+	for _, opt := range opts {
+		opt(d)
+	}
+	return d, nil
 }
 
 // Close releases the platform state held by the Decoder. It is
@@ -72,7 +86,7 @@ func (d *Decoder) DecodeFile(path string) (pcm []byte, format Format, err error)
 	if d.closed {
 		return nil, format, ErrClosed
 	}
-	return load(path)
+	return d.drain(openStreamFile(path))
 }
 
 // Decode decodes compressed audio held in memory, returning s16le PCM
@@ -83,7 +97,22 @@ func (d *Decoder) Decode(compressed []byte) (pcm []byte, format Format, err erro
 	if d.closed {
 		return nil, format, ErrClosed
 	}
-	return decode(compressed)
+	return d.drain(openStream(compressed))
+}
+
+// drain reads a stream to completion under the decoder's limits, always
+// closing it. Routing the buffered API through the streaming one is what
+// lets limits apply to both.
+func (d *Decoder) drain(s *Stream, err error) ([]byte, Format, error) {
+	if err != nil {
+		return nil, Format{}, err
+	}
+	defer s.Close()
+	pcm, err := io.ReadAll(newLimited(s.r, d.limits))
+	if err != nil {
+		return nil, s.format, err
+	}
+	return pcm, s.format, nil
 }
 
 // Format describes the PCM a decode produced, and is everything needed
@@ -110,6 +139,7 @@ func (d *Decoder) Stream(compressed []byte) (*Stream, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.r = newLimited(s.r, d.limits)
 	d.track(s)
 	return s, nil
 }
@@ -131,6 +161,7 @@ func (d *Decoder) StreamFile(path string) (*Stream, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.r = newLimited(s.r, d.limits)
 	d.track(s)
 	return s, nil
 }

@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"sync"
 	"syscall"
+	"time"
 	"unicode/utf16"
 	"unsafe"
 
@@ -52,6 +53,7 @@ type Stream struct {
 	attributes *IMFAttributes
 	reader     *IMFSourceReader
 	samples    *SourceReader
+	cb         *callback
 
 	format Format
 	closed bool
@@ -79,12 +81,21 @@ func Open(compressed []byte) (_ *Stream, err error) {
 		return nil, fmt.Errorf("creating MFByteStream from IStream: %w", err)
 	}
 
-	// Attributes to configure the source reader with; specifically, enable hardware codecs.
-	if err := MFCreateAttributes(&s.attributes, 1); err != nil {
+	// Attributes to configure the source reader with: hardware codecs,
+	// and the callback that puts the reader in asynchronous mode.
+	if err := MFCreateAttributes(&s.attributes, 2); err != nil {
 		return nil, fmt.Errorf("creating attributes to apply to source reader: %w", err)
 	}
 	if err := s.attributes.SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1); err != nil {
 		return nil, fmt.Errorf("enabling hardware transforms: %w", err)
+	}
+
+	// Without a callback the reader is synchronous, and a synchronous
+	// ReadSample on a malformed stream can block forever with no way to
+	// interrupt it.
+	s.cb = newCallback()
+	if err := s.attributes.SetUnknown(&MF_SOURCE_READER_ASYNC_CALLBACK, unsafe.Pointer(s.cb)); err != nil {
+		return nil, fmt.Errorf("setting async callback: %w", err)
 	}
 
 	// Create the source reader using the byte stream.
@@ -101,7 +112,7 @@ func Open(compressed []byte) (_ *Stream, err error) {
 		return nil, fmt.Errorf("getting format: %w", err)
 	}
 
-	s.samples = NewSourceReader(s.reader)
+	s.samples = NewSourceReader(s.reader, s.cb)
 
 	return s, nil
 }
@@ -110,6 +121,18 @@ func Open(compressed []byte) (_ *Stream, err error) {
 // the stream is opened.
 func (s *Stream) Format() Format {
 	return s.format
+}
+
+// SetDeadline bounds how long the stream may go on decoding. Reads fail
+// once it passes, including a read already waiting on the decoder. A
+// zero time clears it.
+//
+// Without this the only bound is the per-read backstop, which a file
+// that decodes slowly but steadily never trips.
+func (s *Stream) SetDeadline(t time.Time) {
+	if s.samples != nil {
+		s.samples.deadline = t
+	}
 }
 
 // Read fills p with decoded PCM, returning [io.EOF] once the source is
@@ -125,11 +148,38 @@ func (s *Stream) Read(p []byte) (int, error) {
 
 // Close releases the Media Foundation objects backing the stream. It is
 // idempotent.
+//
+// Releasing a source reader waits for Media Foundation to finish what it
+// is doing. After a clean end of stream that is immediate, and after the
+// caller simply stops reading early it is still prompt.
+//
+// It is not prompt when the decoder stopped answering, which malformed
+// audio can cause: the release blocks with no way to cancel it. Flushing
+// the reader and closing the byte stream underneath it were both measured
+// to make no difference, and one blocked release was watched for ten
+// minutes without returning, so treat it as permanent.
+//
+// Such a reader is leaked rather than released on a goroutine. A release
+// that never returns never frees anything either, so waiting on it leaks
+// the same objects and adds a thread: waiting is a superset of not
+// waiting, which is the whole argument. The thread itself costs no CPU,
+// since one parked in a blocking system call is never scheduled, and it
+// does not slow the scheduler, which tracks processors rather than
+// threads. What it does is count against the runtime limit of 10000
+// operating system threads, and crossing that is a fatal thread
+// exhaustion rather than a slowdown. At roughly one thread per bad file
+// that ceiling is reachable by a program decoding untrusted input.
+//
+// Everything else is released either way, and the reader keeps its own
+// references to what it still needs.
 func (s *Stream) Close() error {
 	if s.closed {
 		return nil
 	}
 	s.closed = true
+	if s.samples != nil && s.samples.gaveUp && s.reader != nil {
+		s.reader = nil
+	}
 	s.release()
 	return nil
 }
@@ -157,25 +207,14 @@ func (s *Stream) release() {
 		s.istream.Release()
 		s.istream = nil
 	}
+	// Last: the reader is gone by now, so Media Foundation is finished
+	// calling us. Any reference it still holds keeps the object alive.
+	if s.cb != nil {
+		s.cb.Release()
+		s.cb = nil
+	}
 	runtime.KeepAlive(s.compressed)
 	s.compressed = nil
-}
-
-// Decode compressed audio, returning the uncompressed data as PCM data
-// (s16le) and details about the PCM required to playback correctly.
-func Decode(compressed []byte) (uncompressed []byte, format Format, err error) {
-	s, err := Open(compressed)
-	if err != nil {
-		return nil, format, err
-	}
-	defer s.Close()
-
-	buf, err := io.ReadAll(s)
-	if err != nil {
-		return nil, s.format, err
-	}
-
-	return buf, s.format, nil
 }
 
 // configureAudioStream selects the first audio stream and configures it output PCM.
@@ -262,13 +301,24 @@ type SourceReader struct {
 	prevTimestamp int64 // timestamp of the last emitted sample.
 	hasPrev       bool  // whether any sample has been emitted yet.
 
+	cb *callback // receives asynchronous reads.
+
+	// gaveUp records that a read was abandoned because the decoder
+	// stopped answering, as opposed to the caller simply stopping early.
+	gaveUp bool
+
+	// deadline bounds the whole decode, not just one read. Zero means
+	// only the per-read backstop applies.
+	deadline time.Time
+
 	data []byte // Go view of the audio data, backed by native memory.
 }
 
-// NewSourceReader allocates a [SourceReader].
-// The caller is responsible for releasing the underlying [IMFSourceReader].
-func NewSourceReader(r *IMFSourceReader) *SourceReader {
-	return &SourceReader{source: r}
+// NewSourceReader allocates a [SourceReader] that pulls samples from r,
+// which must have been created with cb as its asynchronous callback.
+// The caller is responsible for releasing both.
+func NewSourceReader(r *IMFSourceReader, cb *callback) *SourceReader {
+	return &SourceReader{source: r, cb: cb}
 }
 
 func (s *SourceReader) Read(p []byte) (int, error) {
@@ -294,23 +344,55 @@ func (s *SourceReader) Read(p []byte) (int, error) {
 
 // next reads the next audio sample into s, returning false at end of
 // stream. Any error from the source reader ends the stream.
+// maxEmptyReads bounds how many times next will ask for a sample and
+// be given nothing usable.
+//
+// ReadSample can legitimately return success with no sample and no
+// terminal flag while a decoder primes, and it can repeat a timestamp,
+// so a few unproductive reads are normal. An unbounded number is a
+// hang: fuzzing found malformed streams that spin here forever,
+// burning a core and never returning. The limit sits far above what any
+// healthy stream needs.
+const maxEmptyReads = 1024
+
 func (s *SourceReader) next() (bool, error) {
+	empty := 0
 	for {
-		var (
-			flags     uint32
-			timestamp int64
-			sample    *IMFSample
-		)
+		if empty > maxEmptyReads {
+			return false, fmt.Errorf("reading sample: gave up after %d reads without a usable sample", empty)
+		}
+		if err := s.source.ReadSampleAsync(MF_SOURCE_READER_FIRST_AUDIO_STREAM); err != nil {
+			return false, fmt.Errorf("requesting sample: %w", err)
+		}
 
-		err := s.source.ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, nil, &flags, &timestamp, &sample)
+		// Wait no longer than whichever of the caller's deadline and the
+		// backstop comes first.
+		wait := readTimeout
+		if !s.deadline.IsZero() {
+			remaining := time.Until(s.deadline)
+			if remaining <= 0 {
+				s.gaveUp = true
+				return false, fmt.Errorf("reading sample: %w", errReadTimeout)
+			}
+			if remaining < wait {
+				wait = remaining
+			}
+		}
 
-		// A sample can accompany a flag we treat as terminal, so release
-		// it before deciding whether to stop.
-		if err != nil || flags&(MF_SOURCE_READERF_ERROR|MF_SOURCE_READERF_ENDOFSTREAM|MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) != 0 {
+		res, err := s.cb.wait(wait)
+		if err != nil {
+			s.gaveUp = true
+			return false, fmt.Errorf("reading sample: %w", err)
+		}
+		flags, sample := res.flags, res.sample
+
+		// A sample can accompany a status or flag we treat as terminal,
+		// so release it before deciding whether to stop.
+		if failed(res.status) || flags&(MF_SOURCE_READERF_ERROR|MF_SOURCE_READERF_ENDOFSTREAM|MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) != 0 {
 			sample.Release()
 		}
-		if err != nil {
-			return false, fmt.Errorf("reading sample: %w", err)
+		if failed(res.status) {
+			return false, fmt.Errorf("reading sample: %w", MFErr{Code: res.status})
 		}
 		if flags&MF_SOURCE_READERF_ERROR != 0 {
 			return false, fmt.Errorf("reading sample: source reader reported an error")
@@ -323,16 +405,25 @@ func (s *SourceReader) next() (bool, error) {
 		}
 
 		// The reader can legitimately return no sample and no terminal
-		// flag (for example, while a decoder is buffering). Ask again.
+		// flag (for example, while a decoder is buffering). Ask again,
+		// up to the bound above.
 		if sample == nil {
+			empty++
 			continue
 		}
 
-		// Skip samples that repeat the previous timestamp. ReadSample can
+		var timestamp int64
+		if err := sample.GetSampleTime(&timestamp); err != nil {
+			sample.Release()
+			return false, fmt.Errorf("reading sample timestamp: %w", err)
+		}
+
+		// Skip samples that repeat the previous timestamp. The reader can
 		// produce more than one sample at time 0; emitting all of them
 		// produces larger output and audible artifacts.
 		if s.hasPrev && timestamp == s.prevTimestamp {
 			sample.Release()
+			empty++
 			continue
 		}
 
@@ -481,6 +572,22 @@ func (v *IMFByteStream) Release() error {
 	return nil
 }
 
+// Close closes the byte stream, failing any I/O the media source has in
+// flight against it.
+func (v *IMFByteStream) Close() error {
+	if v == nil {
+		return nil
+	}
+	r, _, _ := syscall.SyscallN(
+		v.VTable.Close,
+		uintptr(unsafe.Pointer(v)),
+	)
+	if r != S_OK {
+		return MFErr{Code: r}
+	}
+	return nil
+}
+
 type IStream struct {
 	VTable *IStreamVTable
 }
@@ -576,6 +683,20 @@ func (v *IMFAttributes) SetUINT32(guid *GUID, unValue uint32) error {
 		uintptr(unsafe.Pointer(v)),
 		uintptr(unsafe.Pointer(guid)),
 		uintptr(unValue),
+	)
+	if r != S_OK {
+		return MFErr{Code: r}
+	}
+	return nil
+}
+
+// SetUnknown stores a COM interface pointer under guid, retaining it.
+func (v *IMFAttributes) SetUnknown(guid *GUID, unknown unsafe.Pointer) error {
+	r, _, _ := syscall.SyscallN(
+		v.VTable.SetUnknown,
+		uintptr(unsafe.Pointer(v)),
+		uintptr(unsafe.Pointer(guid)),
+		uintptr(unknown),
 	)
 	if r != S_OK {
 		return MFErr{Code: r}
@@ -759,6 +880,43 @@ func (v *IMFSourceReader) ReadSample(index, controlFlags uint32, actualIndex *ui
 	return nil
 }
 
+// ReadSampleAsync requests the next sample without waiting for it.
+//
+// A reader configured with a callback rejects the synchronous form, and
+// every out-parameter must be nil: the result is delivered to
+// IMFSourceReaderCallback::OnReadSample instead. Only one read may be
+// outstanding at a time.
+func (v *IMFSourceReader) ReadSampleAsync(index uint32) error {
+	r, _, _ := syscall.SyscallN(
+		v.VTable.ReadSample,
+		uintptr(unsafe.Pointer(v)),
+		uintptr(index),
+		0,
+		0,
+		0,
+		0,
+		0,
+	)
+	if r != S_OK {
+		return MFErr{Code: r}
+	}
+	return nil
+}
+
+// Flush discards queued samples and cancels pending reads on a stream.
+// With a callback attached it completes asynchronously, through OnFlush.
+func (v *IMFSourceReader) Flush(index uint32) error {
+	r, _, _ := syscall.SyscallN(
+		v.VTable.Flush,
+		uintptr(unsafe.Pointer(v)),
+		uintptr(index),
+	)
+	if r != S_OK {
+		return MFErr{Code: r}
+	}
+	return nil
+}
+
 type IMFSample struct {
 	VTable *IMFSampleVTable
 }
@@ -820,6 +978,36 @@ func (v *IMFSample) Release() error {
 	r, _, _ := syscall.SyscallN(
 		v.VTable.Release,
 		uintptr(unsafe.Pointer(v)),
+	)
+	if r != S_OK {
+		return MFErr{Code: r}
+	}
+	return nil
+}
+
+// AddRef implements IUnknown::AddRef, retaining a sample past the
+// callback that delivered it.
+func (v *IMFSample) AddRef() uint32 {
+	if v == nil {
+		return 0
+	}
+	r, _, _ := syscall.SyscallN(
+		v.VTable.AddRef,
+		uintptr(unsafe.Pointer(v)),
+	)
+	return uint32(r)
+}
+
+// GetSampleTime returns the presentation time of the sample.
+//
+// Asynchronous delivery also carries a timestamp, but reading it back
+// from the sample keeps the callback signature free of a 64-bit argument
+// whose slot count varies by word size.
+func (v *IMFSample) GetSampleTime(t *int64) error {
+	r, _, _ := syscall.SyscallN(
+		v.VTable.GetSampleTime,
+		uintptr(unsafe.Pointer(v)),
+		uintptr(unsafe.Pointer(t)),
 	)
 	if r != S_OK {
 		return MFErr{Code: r}

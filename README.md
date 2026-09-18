@@ -69,6 +69,10 @@ play.File("audio.m4a")
   always 2.
 - A `Decoder` is safe for concurrent use, and `Close` waits for decodes
   already in flight.
+- `New(WithLimits(...))` bounds how long a decode may run and how much PCM
+  it may produce. Malformed audio can otherwise make a native decoder
+  grind indefinitely, so the default budget is finite. Untrusted input
+  should set its own.
 - `FFmpegLoad`, `FFmpegDecode` and `FFmpegStream` shell out to ffmpeg
   regardless of platform, and need no `Decoder`.
 - The `play` subpackage plays PCM through oto. The core package builds
