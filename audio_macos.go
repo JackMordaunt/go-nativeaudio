@@ -561,3 +561,22 @@ type ErrOSStatus C.OSStatus
 func (e ErrOSStatus) Error() string {
 	return fmt.Sprintf("%v", C.OSStatus(e))
 }
+
+// openStream decodes up front and serves the result from memory.
+// AudioToolbox can decode incrementally, but this backend does not yet.
+func openStream(by []byte) (*Stream, error) {
+	pcm, format, err := decode(by)
+	if err != nil {
+		return nil, err
+	}
+	return newBufferedStream(pcm, format), nil
+}
+
+// openStreamFile decodes up front and serves the result from memory.
+func openStreamFile(path string) (*Stream, error) {
+	pcm, format, err := load(path)
+	if err != nil {
+		return nil, err
+	}
+	return newBufferedStream(pcm, format), nil
+}

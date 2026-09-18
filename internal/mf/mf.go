@@ -39,57 +39,143 @@ func Shutdown() error {
 	return MFShutdown()
 }
 
-// Decode compressed audio, returning the uncompressed data as PCM data
-// (s16le) and details about the PCM required to playback correctly.
-func Decode(compressed []byte) (uncompressed []byte, format Format, err error) {
-	stream := SHCreateMemStream(unsafe.SliceData(compressed), len(compressed))
-	if stream == nil {
-		return nil, format, fmt.Errorf("could not allocate IStream")
+// Stream decodes audio incrementally, implementing [io.ReadCloser] over
+// s16le PCM. It owns the Media Foundation objects backing the decode,
+// so Close must be called to release them.
+type Stream struct {
+	// compressed is retained so the caller's buffer cannot be collected
+	// while the memory stream built from it is still alive.
+	compressed []byte
+
+	istream    *IStream
+	byteStream *IMFByteStream
+	attributes *IMFAttributes
+	reader     *IMFSourceReader
+	samples    *SourceReader
+
+	format Format
+	closed bool
+}
+
+// Open prepares a decode of compressed audio held in memory. The
+// returned Stream yields s16le PCM and must be closed.
+func Open(compressed []byte) (_ *Stream, err error) {
+	s := &Stream{compressed: compressed}
+
+	// Anything already allocated is released if a later step fails.
+	defer func() {
+		if err != nil {
+			s.release()
+		}
+	}()
+
+	s.istream = SHCreateMemStream(unsafe.SliceData(compressed), len(compressed))
+	if s.istream == nil {
+		return nil, fmt.Errorf("could not allocate IStream")
 	}
-	defer stream.Release()
 
 	// We need to adapt the generic IStream to a Media Foundation stream type.
-	var mfByteStream *IMFByteStream
-	if err := MFCreateMFByteStreamOnStream(stream, &mfByteStream); err != nil {
-		return nil, format, fmt.Errorf("creating MFByteStream from IStream: %w", err)
+	if err := MFCreateMFByteStreamOnStream(s.istream, &s.byteStream); err != nil {
+		return nil, fmt.Errorf("creating MFByteStream from IStream: %w", err)
 	}
-	defer mfByteStream.Release()
 
 	// Attributes to configure the source reader with; specifically, enable hardware codecs.
-	var attributes *IMFAttributes
-	if err := MFCreateAttributes(&attributes, 1); err != nil {
-		return nil, format, fmt.Errorf("creating attributes to apply to source reader: %w", err)
+	if err := MFCreateAttributes(&s.attributes, 1); err != nil {
+		return nil, fmt.Errorf("creating attributes to apply to source reader: %w", err)
 	}
-	defer attributes.Release()
-
-	if err := attributes.SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1); err != nil {
-		return nil, format, fmt.Errorf("enabling hardware transforms: %w", err)
+	if err := s.attributes.SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1); err != nil {
+		return nil, fmt.Errorf("enabling hardware transforms: %w", err)
 	}
 
 	// Create the source reader using the byte stream.
-	var mfSourceReader *IMFSourceReader
-	if err := MFCreateSourceReaderFromByteStream(mfByteStream, attributes, &mfSourceReader); err != nil {
-		return nil, format, fmt.Errorf("creating IMFSourceReader from IMFByteStream: %w", err)
-	}
-	defer mfSourceReader.Release()
-
-	if err := configureAudioStream(mfSourceReader); err != nil {
-		return nil, format, fmt.Errorf("configuring audio stream: %w", err)
+	if err := MFCreateSourceReaderFromByteStream(s.byteStream, s.attributes, &s.reader); err != nil {
+		return nil, fmt.Errorf("creating IMFSourceReader from IMFByteStream: %w", err)
 	}
 
-	format, err = getSourceReaderFormat(mfSourceReader)
+	if err := configureAudioStream(s.reader); err != nil {
+		return nil, fmt.Errorf("configuring audio stream: %w", err)
+	}
+
+	s.format, err = getSourceReaderFormat(s.reader)
 	if err != nil {
-		return nil, format, fmt.Errorf("getting format: %w", err)
+		return nil, fmt.Errorf("getting format: %w", err)
 	}
 
-	buf, err := io.ReadAll(NewSourceReader(mfSourceReader))
+	s.samples = NewSourceReader(s.reader)
+
+	return s, nil
+}
+
+// Format describes the PCM this stream produces. It is known as soon as
+// the stream is opened.
+func (s *Stream) Format() Format {
+	return s.format
+}
+
+// Read fills p with decoded PCM, returning [io.EOF] once the source is
+// exhausted.
+func (s *Stream) Read(p []byte) (int, error) {
+	if s.closed {
+		return 0, fmt.Errorf("read on closed stream")
+	}
+	n, err := s.samples.Read(p)
+	runtime.KeepAlive(s.compressed)
+	return n, err
+}
+
+// Close releases the Media Foundation objects backing the stream. It is
+// idempotent.
+func (s *Stream) Close() error {
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	s.release()
+	return nil
+}
+
+// release drops every object the stream holds, in reverse order of
+// acquisition. Safe to call on a partially constructed Stream.
+func (s *Stream) release() {
+	if s.samples != nil {
+		s.samples.Close()
+		s.samples = nil
+	}
+	if s.reader != nil {
+		s.reader.Release()
+		s.reader = nil
+	}
+	if s.attributes != nil {
+		s.attributes.Release()
+		s.attributes = nil
+	}
+	if s.byteStream != nil {
+		s.byteStream.Release()
+		s.byteStream = nil
+	}
+	if s.istream != nil {
+		s.istream.Release()
+		s.istream = nil
+	}
+	runtime.KeepAlive(s.compressed)
+	s.compressed = nil
+}
+
+// Decode compressed audio, returning the uncompressed data as PCM data
+// (s16le) and details about the PCM required to playback correctly.
+func Decode(compressed []byte) (uncompressed []byte, format Format, err error) {
+	s, err := Open(compressed)
 	if err != nil {
 		return nil, format, err
 	}
+	defer s.Close()
 
-	runtime.KeepAlive(compressed)
+	buf, err := io.ReadAll(s)
+	if err != nil {
+		return nil, s.format, err
+	}
 
-	return buf, format, nil
+	return buf, s.format, nil
 }
 
 // configureAudioStream selects the first audio stream and configures it output PCM.
@@ -289,6 +375,24 @@ func (s *SourceReader) copyInto(p []byte) int {
 	}
 
 	return n
+}
+
+// Close releases any sample the reader is still holding. A stream that
+// is abandoned before EOF leaves a locked buffer and a live sample
+// behind, so this is not merely tidiness.
+func (s *SourceReader) Close() error {
+	if s.buffer != nil {
+		s.buffer.Unlock()
+		s.buffer.Release()
+		s.buffer = nil
+	}
+	if s.sample != nil {
+		s.sample.Release()
+		s.sample = nil
+	}
+	s.data = nil
+	s.chunk = nil
+	return nil
 }
 
 /*

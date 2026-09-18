@@ -9,11 +9,14 @@ package nativeaudio
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // FFmpegLoad raw PCM with ffmpeg.
@@ -141,5 +144,79 @@ func (s stream) Format() (Format, error) {
 		// We are going to tell ffmpeg to output s16le, though there
 		// might be a better place to make this assumption.
 		BytesPerSample: 2,
+	}, nil
+}
+
+// ffmpegStream pipes PCM out of a running ffmpeg process.
+type ffmpegStream struct {
+	cmd      *exec.Cmd
+	stdout   io.ReadCloser
+	stderr   *bytes.Buffer
+	waitOnce sync.Once
+	waitErr  error
+	drained  bool
+}
+
+// reap waits for ffmpeg exactly once, whoever gets there first.
+func (f *ffmpegStream) reap() error {
+	f.waitOnce.Do(func() { f.waitErr = f.cmd.Wait() })
+	return f.waitErr
+}
+
+func (f *ffmpegStream) Read(p []byte) (int, error) {
+	n, err := f.stdout.Read(p)
+	if errors.Is(err, io.EOF) {
+		// The pipe closing means ffmpeg is finished, so collect its exit
+		// status: a decode that failed halfway still reaches EOF here.
+		f.drained = true
+		if werr := f.reap(); werr != nil {
+			return n, fmt.Errorf("ffmpeg: %w: %s", werr, f.stderr.String())
+		}
+	}
+	return n, err
+}
+
+func (f *ffmpegStream) Close() error {
+	if !f.drained {
+		// Abandoned early. Kill it rather than leave ffmpeg blocked
+		// writing into a pipe nobody is reading, then reap the corpse.
+		// The resulting wait error is ours, not a decode failure.
+		_ = f.cmd.Process.Kill()
+		_ = f.reap()
+		return nil
+	}
+	return f.reap()
+}
+
+// FFmpegStream decodes an audio file with ffmpeg, returning PCM through
+// an [io.Reader] as ffmpeg produces it.
+//
+//	ffmpeg -i <path> -f s16le -
+//
+// Unlike FFmpegLoad this never holds the whole decode in memory. The
+// returned Stream must be closed, including when abandoned early.
+func FFmpegStream(path string) (*Stream, error) {
+	format, err := probe(path)
+	if err != nil {
+		return nil, fmt.Errorf("probing file for metadata: %w", err)
+	}
+	cmd := exec.Command(
+		"ffmpeg",
+		"-i", path,
+		"-f", "s16le",
+		"-",
+	)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("attaching to ffmpeg output: %w", err)
+	}
+	stderr := bytes.NewBuffer(nil)
+	cmd.Stderr = stderr
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("starting ffmpeg: %w", err)
+	}
+	return &Stream{
+		r:      &ffmpegStream{cmd: cmd, stdout: stdout, stderr: stderr},
+		format: format,
 	}, nil
 }

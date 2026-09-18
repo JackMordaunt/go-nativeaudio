@@ -29,10 +29,12 @@ var ErrClosed = errors.New("nativeaudio: decoder is closed")
 // of a program can hold their own without one tearing down the other.
 //
 // A Decoder is safe for concurrent use. Decodes may run in parallel,
-// and Close waits for those in flight to finish.
+// and Close waits for those in flight, and for any open Stream to be
+// closed, before releasing platform state.
 type Decoder struct {
-	mu     sync.RWMutex
-	closed bool
+	mu      sync.RWMutex
+	closed  bool
+	streams sync.WaitGroup
 }
 
 // New creates a Decoder, initialising any platform state the backend
@@ -53,6 +55,9 @@ func (d *Decoder) Close() error {
 		return nil
 	}
 	d.closed = true
+	// Wait for open streams before tearing down platform state, which
+	// their decoder objects are still using.
+	d.streams.Wait()
 	if err := end(); err != nil {
 		return fmt.Errorf("shutting down platform decoder: %w", err)
 	}
@@ -87,4 +92,53 @@ type Format struct {
 	SampleRate     int // samples per second.
 	Channels       int // number of channels.
 	BytesPerSample int // bytes per sample; always 2, for the s16le output this package produces.
+}
+
+// Stream decodes compressed audio held in memory, returning PCM through
+// an [io.Reader] rather than a single buffer.
+//
+// The returned Stream must be closed. Only the Windows backend decodes
+// incrementally today; elsewhere the audio is decoded up front and
+// served from memory, which is correct but saves nothing.
+func (d *Decoder) Stream(compressed []byte) (*Stream, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if d.closed {
+		return nil, ErrClosed
+	}
+	s, err := openStream(compressed)
+	if err != nil {
+		return nil, err
+	}
+	d.track(s)
+	return s, nil
+}
+
+// StreamFile decodes the audio file at path, returning PCM through an
+// [io.Reader] rather than a single buffer.
+//
+// The returned Stream must be closed. Backends that shell out to ffmpeg
+// pipe the decode directly, so the PCM is never held whole; the Windows
+// backend reads the compressed file into memory first, which is small
+// next to the PCM it avoids buffering.
+func (d *Decoder) StreamFile(path string) (*Stream, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if d.closed {
+		return nil, ErrClosed
+	}
+	s, err := openStreamFile(path)
+	if err != nil {
+		return nil, err
+	}
+	d.track(s)
+	return s, nil
+}
+
+// track registers an open Stream so Close can wait for it. The caller
+// holds at least a read lock, which is what keeps this from racing the
+// Wait in Close.
+func (d *Decoder) track(s *Stream) {
+	d.streams.Add(1)
+	s.done = d.streams.Done
 }

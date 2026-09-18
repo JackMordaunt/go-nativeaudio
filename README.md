@@ -60,13 +60,20 @@ play.File("audio.m4a")
   closing one does not disturb another.
 - `Decoder.DecodeFile(path)` and `Decoder.Decode(data)` return s16le PCM
   and a `Format`. The core package has no audio-output dependency.
+- `Decoder.StreamFile(path)` and `Decoder.Stream(data)` return a `Stream`,
+  an `io.Reader` over the same PCM, so a long track never has to sit in
+  memory whole. `Format` is known before the first read. Close it when
+  done. Windows decodes incrementally and the ffmpeg backend pipes; macOS
+  currently decodes up front and serves from memory.
 - `Format` reports `SampleRate`, `Channels` and `BytesPerSample`, which is
   always 2.
 - A `Decoder` is safe for concurrent use, and `Close` waits for decodes
   already in flight.
-- `FFmpegLoad` and `FFmpegDecode` shell out to ffmpeg regardless of
-  platform, and need no `Decoder`.
-- The `play` subpackage plays PCM through oto on every platform. Its
+- `FFmpegLoad`, `FFmpegDecode` and `FFmpegStream` shell out to ffmpeg
+  regardless of platform, and need no `Decoder`.
+- The `play` subpackage plays PCM through oto. The core package builds
+  for every target Go supports; `play` is bounded by its audio backend,
+  which needs cgo on Linux and has no FreeBSD support. Its
   context is fixed to the first file's sample rate and channel count for
   the life of the process.
 
@@ -77,5 +84,5 @@ Foundation bindings internal.
 
 ## TODO 
 
-- [ ] streaming API (current API is a buffered for simplicity)
+- [ ] macOS: decode incrementally rather than buffering behind `Stream`
 - [ ] Linux: something better then shelling out to FFmpeg
