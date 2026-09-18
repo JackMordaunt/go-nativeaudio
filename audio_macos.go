@@ -507,17 +507,31 @@ func InputDataProc(
 ) C.OSStatus {
 	ic := cgo.Handle(uintptr(inUserData)).Value().(*InputContext)
 
+	// Only variable bitrate input carries packet descriptions. Constant
+	// bitrate input has none, and there the out-parameter arrives
+	// uninitialised, so reading it back to pass along, as this used to,
+	// hands the file reader whatever happened to be on the stack.
+	//
+	// Nothing caught it because the only fixture was AAC, which is
+	// variable. The first constant bitrate input, a plain WAV, wedged the
+	// converter until the test timeout.
+	var packetDescriptions *C.AudioStreamPacketDescription
+
 	if ic.mInputUsesPacketDescriptions == _true {
 		// Cap the number of data packets to the capacity of the slice.
 		if int(*ioNumberDataPackets) > cap(ic.mPacketDescriptions) {
 			*ioNumberDataPackets = C.UInt32(cap(ic.mPacketDescriptions))
 		}
-		*outDataPacketDescription = unsafe.SliceData(ic.mPacketDescriptions)
+		packetDescriptions = unsafe.SliceData(ic.mPacketDescriptions)
+	}
+
+	if outDataPacketDescription != nil {
+		*outDataPacketDescription = packetDescriptions
 	}
 
 	if err := ic.mInputFile.ReadPackets(
 		&ioData.mBuffers[0].mDataByteSize,
-		*outDataPacketDescription,
+		packetDescriptions,
 		ioNumberDataPackets,
 		ioData.mBuffers[0].mData,
 	); err != nil {
