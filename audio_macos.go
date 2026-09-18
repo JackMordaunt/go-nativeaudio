@@ -550,11 +550,22 @@ func AudioFileReadProcImpl(
 
 	dst := outBuf[:req]
 
-	// It seems like the requested amount is allowed to exceed the
-	// actual size of the audio data. In that case we need to bound
-	// it by the length of the audio data.
+	// The requested amount is allowed to exceed the actual size of the
+	// audio data, and a read can start beyond the end of it, so clamp
+	// both ends. Clamping only the end would slice with the start past
+	// the finish and panic inside a C callback, which takes the process
+	// with it.
+	if pos < 0 {
+		pos = 0
+	}
+	if pos > len(inBuf) {
+		pos = len(inBuf)
+	}
 	if end > len(inBuf) {
 		end = len(inBuf)
+	}
+	if end < pos {
+		end = pos
 	}
 
 	src := inBuf[pos:end]
@@ -571,7 +582,14 @@ func AudioFileGetSizeProcImpl(
 	inClientData unsafe.Pointer,
 ) C.SInt64 {
 	inBuf := cgo.Handle(uintptr(inClientData)).Value().([]byte)
-	return C.SInt64(cap(inBuf))
+
+	// The length, not the capacity. A slice built by append or returned
+	// by io.ReadAll usually has room to spare, and reporting that as the
+	// file size tells AudioToolbox there is more audio than there is. It
+	// then keeps asking for data past the end, gets short reads reported
+	// as success, and never stops: a generated WAV hung the decode for
+	// five minutes before this was found.
+	return C.SInt64(len(inBuf))
 }
 
 // unwrapOSStatus extracts the [OSStatus] from an [error] for conforming to C
