@@ -69,7 +69,20 @@ func PCM(pcm []byte, format nativeaudio.Format) error {
 	// internal buffer (half a second by default) has been played out, or
 	// the player fails. Waiting only for the source to hit EOF would cut
 	// off the tail of the audio.
+	//
+	// It can also stay true forever on a machine whose audio output never
+	// makes progress, which is what a CI runner with no sound device
+	// looks like. The audio's own length is the natural bound, with
+	// enough slack for the buffer and for a slow start.
+	budget := Duration(pcm, format)
+	budget += budget/4 + 10*time.Second
+	deadline := time.Now().Add(budget)
 	for player.IsPlaying() {
+		if time.Now().After(deadline) {
+			player.Close()
+			ctx.Suspend()
+			return fmt.Errorf("playback did not finish within %s; the audio device is not making progress", budget.Round(time.Second))
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	err = player.Err()
@@ -108,4 +121,16 @@ func Data(compressed []byte) error {
 		return fmt.Errorf("decoding: %w", err)
 	}
 	return PCM(pcm, format)
+}
+
+// Duration reports how long the PCM will take to play.
+//
+// It is what bounds the wait in [PCM], and is useful to callers sizing a
+// timeout of their own.
+func Duration(pcm []byte, format nativeaudio.Format) time.Duration {
+	perSecond := format.SampleRate * format.Channels * format.BytesPerSample
+	if perSecond <= 0 {
+		return 0
+	}
+	return time.Duration(len(pcm)) * time.Second / time.Duration(perSecond)
 }
